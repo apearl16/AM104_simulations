@@ -3,6 +3,7 @@
 
 <!-- navigation bar -->
 <nav>
+  <a href="index.html">Home</a>
   <a href="CubicRoots.html">Roots of a cubic</a>
   <a href="Conformal.html">Conformal maps</a>
   <a href="contour_integral.html">Complex integrals</a>
@@ -19,6 +20,25 @@
   <title>D3 Convolution Visualizer (Final Fixes)</title>
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <style>
+    /* shared navigation styling (matches index.html) */
+    nav {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 1.25rem;
+    }
+    nav a {
+      background: white;
+      padding: 10px 14px;
+      border-radius: 8px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+      color: #0b5cff;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    nav a:hover { transform: translateY(-2px); box-shadow: 0 6px 14px rgba(11,92,255,0.06); }
+
     body {
       font-family: system-ui, sans-serif;
       background: #f8f9fa;
