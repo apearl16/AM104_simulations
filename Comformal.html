@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Conformal Map — Domain Coloring (D3)</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+  body { font-family: system-ui, -apple-system, Arial; background:#0f1720; color:#e6eef6; margin:18px; }
+  h1 { font-size:20px; margin-bottom:8px; text-align:center }
+  #controls { display:flex; gap:12px; justify-content:center; align-items:center; margin-bottom:12px; }
+  select, button, input { padding:6px 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.08); background:#111827; color:#e6eef6 }
+  #main { display:flex; gap:18px; justify-content:center; align-items:flex-start }
+  .panel { background:#071028; padding:8px; border-radius:10px; box-shadow: 0 6px 20px rgba(0,0,0,0.6); }
+  .label { text-align:center; margin-top:8px; color:#bcd; }
+  canvas { border-radius:8px; display:block }
+  svg.overlay { position:absolute; left:0; top:0; pointer-events:auto }
+  .handle { cursor:move; fill:#ffcc66; stroke:#222; stroke-width:1.5 }
+  .handle.center { fill:#66ccff }
+  .mapped-shape { fill: rgba(255,200,60,0.12); stroke: rgba(255,200,60,0.95); stroke-width:1.5 }
+</style>
+</head>
+<body>
+  <h1>Conformal Map — Domain Coloring (pre-image → image)</h1>
+
+  <div id="controls">
+    <label>Shape:
+      <select id="shapeSelect">
+        <option value="circle">Circle</option>
+        <option value="rectangle">Rectangle</option>
+        <option value="polygon">Polygon (drag verts)</option>
+      </select>
+    </label>
+
+    <label>Function:
+      <select id="funcSelect">
+        <option value="id">f(z) = z</option>
+        <option value="z2">f(z) = z^2</option>
+        <option value="z3">f(z) = z^3</option>
+        <option value="exp">f(z) = e^z</option>
+        <option value="log">f(z) = log(z)</option>
+        <option value="inv">f(z) = 1/z</option>
+        <option value="sin">f(z) = sin(z)</option>
+        <option value="cos">f(z) = cos(z)</option>
+      </select>
+    </label>
+
+    <label>Resolution:
+      <input id="resRange" type="range" min="120" max="600" step="40" value="360">
+    </label>
+
+    <button id="resetBtn">Reset shape</button>
+  </div>
+
+  <div id="main">
+    <div class="panel">
+      <div style="position:relative; width:420px; height:420px">
+        <canvas id="preCanvas" width="400" height="400" style="background:#041823"></canvas>
+        <svg id="preOverlay" class="overlay" width="400" height="400"></svg>
+      </div>
+      <div class="label">Pre-image (domain coloring of f(z)=z)</div>
+    </div>
+
+    <div class="panel">
+      <div style="position:relative; width:420px; height:420px">
+        <canvas id="imgCanvas" width="400" height="400" style="background:#041823"></canvas>
+        <svg id="imgOverlay" class="overlay" width="400" height="400"></svg>
+      </div>
+      <div class="label">Image (domain coloring of chosen map)</div>
+    </div>
+  </div>
+
+<script>
+// ------------------------- Utilities & Complex type -------------------------
+class Complex {
+  constructor(re, im){ this.re = re; this.im = im; }
+  add(b){ return new Complex(this.re + b.re, this.im + b.im); }
+  sub(b){ return new Complex(this.re - b.re, this.im - b.im); }
+  mul(b){ return new Complex(this.re*b.re - this.im*b.im, this.re*b.im + this.im*b.re); }
+  scale(s){ return new Complex(this.re*s, this.im*s); }
+  conj(){ return new Complex(this.re, -this.im); }
+  div(b){ const d = b.re*b.re + b.im*b.im; return new Complex((this.re*b.re + this.im*b.im)/d, (this.im*b.re - this.re*b.im)/d); }
+  abs(){ return Math.hypot(this.re, this.im); }
+  arg(){ return Math.atan2(this.im, this.re); }
+}
+
+// ------------------------- Mapping functions -------------------------
+function mapFunc(z, type){
+  try{
+    switch(type){
+      case 'id': return z;
+      case 'z2': return z.mul(z);
+      case 'z3': return z.mul(z).mul(z);
+      case 'exp': {
+        const e = Math.exp(z.re);
+        return new Complex(e*Math.cos(z.im), e*Math.sin(z.im));
+      }
+      case 'log': {
+        const r = z.abs(); const theta = z.arg();
+        return new Complex(Math.log(Math.max(r,1e-12)), theta);
+      }
+      case 'inv': {
+        const d = z.re*z.re + z.im*z.im || 1e-12;
+        return new Complex(z.re/d, -z.im/d);
+      }
+      case 'sin': {
+        return new Complex(Math.sin(z.re)*Math.cosh(z.im), Math.cos(z.re)*Math.sinh(z.im));
+      }
+      case 'cos': {
+        return new Complex(Math.cos(z.re)*Math.cosh(z.im), -Math.sin(z.re)*Math.sinh(z.im));
+      }
+    }
+  }catch(e){ return new Complex(NaN,NaN); }
+}
+
+// ------------------------- Domain coloring -------------------------
+function colorFor(w){
+  const arg = w.arg();
+  const hue = (arg / Math.PI * 180 + 180) % 360;
+  const mag = w.abs();
+  const sat = 100;
+  const light = 0.5 - 0.15*Math.tanh(Math.log10(mag+1));
+  return d3.hsl(hue, sat/100, Math.max(0.02, Math.min(0.98, light))).formatHex();
+}
+
+function drawDomainToCanvas(ctx, funcType, viewSize, res){
+  const w = ctx.canvas.width, h = ctx.canvas.height;
+  const img = ctx.createImageData(w, h);
+  const scale = viewSize; // half-range in complex coords
+  let i=0;
+  for(let py=0; py<h; py++){
+    const im = scale*(h/2 - py)/(h/2);
+    for(let px=0; px<w; px++){
+      const re = scale*(px - w/2)/(w/2);
+      const z = new Complex(re, im);
+      const col = d3.color(colorFor(mapFunc(z, funcType)));
+      img.data[i++] = col.r; img.data[i++] = col.g; img.data[i++] = col.b; img.data[i++] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+// ------------------------- Scene setup -------------------------
+const preCanvas = document.getElementById('preCanvas');
+const preCtx = preCanvas.getContext('2d');
+const imgCanvas = document.getElementById('imgCanvas');
+const imgCtx = imgCanvas.getContext('2d');
+const preSVG = d3.select('#preOverlay');
+const imgSVG = d3.select('#imgOverlay');
+
+let viewSize = 2.2; // complex plane half-range
+let funcType = document.getElementById('funcSelect').value;
+let shapeType = document.getElementById('shapeSelect').value;
+let res = +document.getElementById('resRange').value;
+
+// shape state
+let circle = {cx:200, cy:200, r:80};
+let rect = {x:120, y:120, w:160, h:120};
+let poly = [{x:120,y:120},{x:280,y:120},{x:300,y:260},{x:140,y:280}];
+
+// ------------------------- Helpers -------------------------
+function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+function pixelToComplex(p, canvas){
+  const re = viewSize*(p.x - canvas.width/2)/(canvas.width/2);
+  const im = viewSize*(canvas.height/2 - p.y)/(canvas.height/2);
+  return new Complex(re, im);
+}
+function complexToPixel(z, canvas){
+  const px = (z.re/viewSize)*(canvas.width/2) + canvas.width/2;
+  const py = canvas.height/2 - (z.im/viewSize)*(canvas.height/2);
+  return {x:px, y:py};
+}
+
+// sample boundary points (in pixel coordinates) for mapping
+function sampleCircle(circle, n=160){
+  const pts = [];
+  for(let i=0;i<n;i++){ const t = 2*Math.PI*i/n; pts.push({x: circle.cx + circle.r*Math.cos(t), y: circle.cy + circle.r*Math.sin(t) }); }
+  return pts;
+}
+function sampleRect(rect, nPerSide=40){
+  const pts=[]; const {x,y,w,h}=rect; const n=nPerSide;
+  for(let i=0;i<n;i++) pts.push({x:x + (i/n)*w, y:y});
+  for(let i=0;i<n;i++) pts.push({x:x+w, y:y + (i/n)*h});
+  for(let i=0;i<n;i++) pts.push({x:x + w - (i/n)*w, y:y+h});
+  for(let i=0;i<n;i++) pts.push({x:x, y:y + h - (i/n)*h});
+  return pts;
+}
+function samplePoly(poly, nPerEdge=40){
+  const pts=[];
+  for(let k=0;k<poly.length;k++){
+    const a=poly[k], b=poly[(k+1)%poly.length];
+    for(let i=0;i<nPerEdge;i++){ const t=i/nPerEdge; pts.push({x: a.x + (b.x-a.x)*t, y: a.y + (b.y-a.y)*t}); }
+  }
+  return pts;
+}
+
+// ------------------------- Render/update -------------------------
+function renderAll(){
+  res = +document.getElementById('resRange').value;
+  funcType = document.getElementById('funcSelect').value;
+  shapeType = document.getElementById('shapeSelect').value;
+
+  // draw domain colorings
+  drawDomainToCanvas(preCtx, 'id', viewSize, res);
+  drawDomainToCanvas(imgCtx, funcType, viewSize, res);
+
+  preSVG.selectAll('*').remove(); imgSVG.selectAll('*').remove();
+
+  // draw pre-image shape & handles (interactive)
+  if(shapeType==='circle'){
+    preSVG.append('circle').attr('cx',circle.cx).attr('cy',circle.cy).attr('r',circle.r)
+      .attr('fill','none').attr('stroke','#ffd27f').attr('stroke-width',2);
+
+    // center handle
+    preSVG.selectAll('.cCenter').data([circle]).join('circle')
+      .attr('class','handle center cCenter').attr('r',6)
+      .attr('cx',d=>d.cx).attr('cy',d=>d.cy)
+      .call(d3.drag()
+        .on('drag', (event,d)=>{ d.cx=clamp(event.x,0,400); d.cy=clamp(event.y,0,400); renderAll(); })
+      );
+
+    // radius handle
+    preSVG.selectAll('.cRadius').data([circle]).join('circle')
+      .attr('class','handle cRadius').attr('r',6)
+      .attr('cx',d=>d.cx+d.r).attr('cy',d=>d.cy)
+      .call(d3.drag()
+        .on('drag', (event,d)=>{ d.r = Math.max(6, Math.hypot(event.x-d.cx, event.y-d.cy)); renderAll(); })
+      );
+
+    // compute mapped boundary and draw on image
+    const prePts = sampleCircle(circle, Math.max(80, Math.floor(res/4)));
+    drawMappedBoundary(prePts);
+  }
+  else if(shapeType==='rectangle'){
+    preSVG.append('rect').attr('x',rect.x).attr('y',rect.y).attr('width',rect.w).attr('height',rect.h)
+      .attr('fill','none').attr('stroke','#ffd27f').attr('stroke-width',2);
+
+    // four handles (corners)
+    const corners = [ {x:rect.x,y:rect.y}, {x:rect.x+rect.w,y:rect.y}, {x:rect.x+rect.w,y:rect.y+rect.h}, {x:rect.x,y:rect.y+rect.h} ];
+    preSVG.selectAll('.corner').data(corners).enter().append('circle').attr('class','handle corner')
+      .attr('r',6).attr('cx',d=>d.x).attr('cy',d=>d.y)
+      .call(d3.drag().on('drag', (event,d,i)=>{
+        // update corresponding corner and rect
+        const cx = clamp(event.x,0,400), cy = clamp(event.y,0,400);
+        if(i===0){ rect.x = cx; rect.y = cy; rect.w = rect.w + (rect.x - cx); rect.h = rect.h + (rect.y - cy); }
+        // recompute corners - simpler approach: allow moving full rect by dragging center instead
+        renderAll();
+      }));
+
+    // center handle to move
+    preSVG.selectAll('.rCenter').data([rect]).join('circle')
+      .attr('class','handle center rCenter').attr('r',6)
+      .attr('cx', d=>d.x+d.w/2).attr('cy', d=>d.y+d.h/2)
+      .call(d3.drag()
+        .on('drag', (event,d)=>{
+          const dx = clamp(event.x,0,400)-(d.x+d.w/2);
+          const dy = clamp(event.y,0,400)-(d.y+d.h/2);
+          d.x = clamp(d.x+dx,0,400-d.w);
+          d.y = clamp(d.y+dy,0,400-d.h);
+          renderAll();
+        })
+      );
+
+    const prePts = sampleRect(rect, Math.max(30, Math.floor(res/12)));
+    drawMappedBoundary(prePts);
+  }
+  else if(shapeType==='polygon'){
+    // draw polygon
+    preSVG.append('polygon').attr('points', poly.map(p=>p.x+','+p.y).join(' '))
+      .attr('fill','none').attr('stroke','#ffd27f').attr('stroke-width',2);
+    // vertex handles
+    preSVG.selectAll('.vhandle')
+      .data(poly)
+      .join('circle')
+      .attr('class','handle vhandle')
+      .attr('r',6)
+      .attr('cx', d=>d.x)
+      .attr('cy', d=>d.y)
+      .call(d3.drag()
+        .on('drag', (event,d)=>{
+          d.x = clamp(event.x,0,400);
+          d.y = clamp(event.y,0,400);
+          renderAll();
+        })
+      );
+
+    const prePts = samplePoly(poly, Math.max(20, Math.floor(res/20)));
+    drawMappedBoundary(prePts);
+  }
+}
+
+// ------------------------- Mapping & drawing mapped boundary -------------------------
+function drawMappedBoundary(prePts){
+  // map each pre-image pixel point through the function and plot polyline on image overlay
+  const mapped = prePts.map(p => {
+    const z = pixelToComplex(p, preCanvas);
+    const w = mapFunc(z, funcType);
+    return complexToPixel(w, imgCanvas);
+  });
+
+  // draw filled mapped shape (use path)
+  imgSVG.append('path')
+    .attr('d', d3.line().x(d=>d.x).y(d=>d.y)(mapped))
+    .attr('class','mapped-shape')
+    .attr('fill','rgba(255,200,60,0.12)')
+    .attr('stroke','rgba(255,200,60,0.95)')
+    .attr('stroke-width',1.5);
+
+  // also draw handles on image that correspond to mapped control points (for reference only)
+  // show a few mapped handles
+  const step = Math.max(1, Math.floor(mapped.length/12));
+  const handlePts = mapped.filter((_,i)=>i%step===0);
+  imgSVG.selectAll('.mapHandle').data(handlePts).enter().append('circle')
+    .attr('class','mapHandle').attr('r',4).attr('fill','#ffd27f').attr('cx',d=>d.x).attr('cy',d=>d.y);
+}
+
+// ------------------------- Events -------------------------
+
+// controls
+document.getElementById('funcSelect').addEventListener('change', ()=>{ funcType = document.getElementById('funcSelect').value; renderAll(); });
+document.getElementById('shapeSelect').addEventListener('change', ()=>{ shapeType = document.getElementById('shapeSelect').value; renderAll(); });
+document.getElementById('resRange').addEventListener('input', ()=>{ renderAll(); });
+document.getElementById('resetBtn').addEventListener('click', ()=>{ circle={cx:200,cy:200,r:80}; rect={x:120,y:120,w:160,h:120}; poly=[{x:120,y:120},{x:280,y:120},{x:300,y:260},{x:140,y:280}]; renderAll(); });
+
+// let users drag polygon vertices by clicking on preOverlay as well (add vertex)
+preSVG.on('dblclick', (event)=>{
+  if(shapeType!=='polygon') return;
+  const pt = d3.pointer(event, preSVG.node());
+  poly.push({x: clamp(pt[0],0,400), y: clamp(pt[1],0,400)});
+  renderAll();
+});
+
+// initial render
+renderAll();
+</script>
+</body>
+</html>

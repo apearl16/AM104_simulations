@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Gaussian ↔ Fourier (D3)</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+  <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+  <style>
+    body { font-family: system-ui, -apple-system, Arial; margin: 18px; }
+    .container { display:flex; gap:18px; align-items:flex-start; }
+    .panel { background:#fbfbfb; border:1px solid #eee; padding:12px; border-radius:8px; }
+    .plot { width:520px; height:280px; }
+    .controls { display:flex; flex-direction:column; gap:8px; }
+    label { font-weight:600; }
+    .stats { margin-top:8px; font-size:14px; }
+    .formula { background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; margin-bottom:8px; }
+    .footer { margin-top:12px; color:#555; font-size:13px; }
+  </style>
+</head>
+<body>
+  <h2>Fourier Transform of a Gaussian</h2>
+  <div class="container">
+    <div class="panel">
+      <div class="formula">
+        <div>Real-space (normalized): \(f(x)=\sqrt{\tfrac{a}{\pi}}\;e^{-a x^2}\)</div>
+        <div>Fourier (under \(\mathcal{F}[f](k)=\int f(x)e^{-2\pi i k x}\,dx\)): \(F(k)=e^{-\pi^2 k^2/a}\)</div>
+        <div style="margin-top:6px">Standard deviations:
+          \(\sigma_x=\dfrac{1}{\sqrt{2a}}\), \(\sigma_k=\dfrac{\sqrt{a}}{\sqrt{2}\,\pi}\), so
+          \(\sigma_x\sigma_k=\dfrac{1}{2\pi}\) (constant)
+        </div>
+      </div>
+
+      <div style="display:flex; gap:10px;">
+        <svg id="plot-x" class="plot"></svg>
+        <svg id="plot-k" class="plot"></svg>
+      </div>
+
+    </div>
+
+    <div class="panel" style="min-width:260px;">
+      <div class="controls">
+        <label for="aRange">Parameter a (controls width of \(e^{-a x^2}\))</label>
+        <input id="aRange" type="range" min="0.02" max="10" step="0.01" value="0.5">
+        <div style="display:flex; gap:8px; align-items:center;">
+          <input id="aInput" type="number" step="0.01" min="0.02" max="50" value="0.5" style="width:80px">
+          <button id="resetBtn">Reset</button>
+        </div>
+
+        <div class="stats">
+        <div>a = <span id="aval"></span></div>
+        <div>σₓ = <span id="sigmaX"></span></div>
+        <div>σₖ = <span id="sigmaK"></span></div>
+        <div>σₓσₖ = <span id="prod"></span></div>
+        </div>
+
+        <div class="footer">Use the slider or number input to change the real-space width. The two plots update in real time. The product \(\sigma_x\sigma_k\) is constant (under the chosen Fourier convention).</div>
+      </div>
+    </div>
+  </div>
+
+<script>
+// D3 interactive Gaussian ↔ Fourier visualization
+const width = 520, height = 280, margin = {top:18, right:18, bottom:36, left:48};
+const innerW = width - margin.left - margin.right;
+const innerH = height - margin.top - margin.bottom;
+
+const svgX = d3.select('#plot-x')
+  .attr('width', width).attr('height', height);
+const gX = svgX.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+const svgK = d3.select('#plot-k')
+  .attr('width', width).attr('height', height);
+const gK = svgK.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+// domains
+const xDomain = [-6,6];
+const kDomain = [-3,3];
+
+const xScale = d3.scaleLinear().domain(xDomain).range([0, innerW]);
+const kScale = d3.scaleLinear().domain(kDomain).range([0, innerW]);
+
+const yScaleX = d3.scaleLinear().range([innerH,0]);
+const yScaleK = d3.scaleLinear().range([innerH,0]);
+
+// axes
+gX.append('g').attr('class','x-axis').attr('transform', `translate(0,${innerH})`);
+gX.append('g').attr('class','y-axis');
+
+gK.append('g').attr('class','x-axis').attr('transform', `translate(0,${innerH})`);
+gK.append('g').attr('class','y-axis');
+
+// lines
+const line = d3.line().x(d=>xScale(d.x)).y(d=>yScaleX(d.y));
+const lineK = d3.line().x(d=>kScale(d.k)).y(d=>yScaleK(d.y));
+
+const pathX = gX.append('path').attr('fill','none').attr('stroke','#1f77b4').attr('stroke-width',2);
+const pathK = gK.append('path').attr('fill','none').attr('stroke','#ff7f0e').attr('stroke-width',2);
+
+// labels
+gX.append('text').attr('x', innerW/2).attr('y', innerH + 30).attr('text-anchor','middle').text('x');
+gX.append('text').attr('x', -40).attr('y', -6).text('f(x)');
+
+gK.append('text').attr('x', innerW/2).attr('y', innerH + 30).attr('text-anchor','middle').text('k');
+gK.append('text').attr('x', -40).attr('y', -6).text('F(k)');
+
+function normalizedRealGaussian(a, xs) {
+  // normalized: sqrt(a/pi) * exp(-a x^2)
+  const A = Math.sqrt(a/Math.PI);
+  return xs.map(x => ({x, y: A * Math.exp(-a * x*x)}));
+}
+function fourierGaussian(a, ks) {
+  // F(k) = exp(-pi^2 k^2 / a) (for normalized input)
+  return ks.map(k => ({k, y: Math.exp(-Math.PI*Math.PI * k*k / a)}));
+}
+
+function computeStats(a) {
+  const sigmaX = 1/Math.sqrt(2*a);
+  const sigmaK = Math.sqrt(a)/(Math.sqrt(2)*Math.PI);
+  return {sigmaX, sigmaK, prod: sigmaX*sigmaK};
+}
+
+// create sample grids
+const xs = d3.range(xDomain[0], xDomain[1] + 1e-6, (xDomain[1]-xDomain[0])/600);
+const ks = d3.range(kDomain[0], kDomain[1] + 1e-6, (kDomain[1]-kDomain[0])/400);
+
+function update(a) {
+  // data
+  const dataX = normalizedRealGaussian(a, xs);
+  const dataK = fourierGaussian(a, ks);
+
+  // update y domain
+  yScaleX.domain([0, d3.max(dataX, d=>d.y) * 1.08]);
+  yScaleK.domain([0, d3.max(dataK, d=>d.y) * 1.08]);
+
+  // axes
+  const xAxis = d3.axisBottom(xScale).ticks(7);
+  const yAxisX = d3.axisLeft(yScaleX).ticks(5);
+  gX.select('.x-axis').call(xAxis);
+  gX.select('.y-axis').call(yAxisX);
+
+  const kAxis = d3.axisBottom(kScale).ticks(7);
+  const yAxisK = d3.axisLeft(yScaleK).ticks(5);
+  gK.select('.x-axis').call(kAxis);
+  gK.select('.y-axis').call(yAxisK);
+
+  // paths
+  pathX.datum(dataX).transition().duration(150).attr('d', d3.line().x(d=>xScale(d.x)).y(d=>yScaleX(d.y)));
+  pathK.datum(dataK).transition().duration(150).attr('d', d3.line().x(d=>kScale(d.k)).y(d=>yScaleK(d.y)));
+
+  // update stats text (rounded)
+  const stats = computeStats(a);
+  d3.select('#aval').text(a.toFixed(3));
+  d3.select('#sigmaX').text(stats.sigmaX.toFixed(4));
+  d3.select('#sigmaK').text(stats.sigmaK.toFixed(6));
+  d3.select('#prod').text(stats.prod.toFixed(6));
+
+  // re-typeset MathJax (for dynamic numbers inside TeX spans)
+  if (window.MathJax && window.MathJax.typeset) window.MathJax.typeset();
+}
+
+// initial value
+let aVal = +document.getElementById('aRange').value;
+update(aVal);
+
+// wire controls
+const aRange = d3.select('#aRange');
+const aInput = d3.select('#aInput');
+
+aRange.on('input', function() {
+  aVal = +this.value; aInput.property('value', aVal);
+  update(aVal);
+});
+
+aInput.on('change', function() {
+  let v = +this.value; if (isNaN(v) || v<=0) v = 0.02; if (v>200) v=200;
+  aVal = v; aRange.property('value', aVal);
+  update(aVal);
+});
+
+d3.select('#resetBtn').on('click', ()=>{ aVal = 0.5; aRange.property('value', aVal); aInput.property('value', aVal); update(aVal); });
+
+// initial MathJax typeset for static formulas
+if (window.MathJax && window.MathJax.typeset) window.MathJax.typeset();
+</script>
+</body>
+</html>

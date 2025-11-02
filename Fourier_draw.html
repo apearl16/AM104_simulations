@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Draw → Fourier → Components → Reconstruction (D3)</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+  body { font-family: system-ui, -apple-system, Arial; margin:18px; background:#0b1220; color:#e6eef6; }
+  h1 { text-align:center; font-size:20px; margin-bottom:12px; }
+  #controls { display:flex; gap:12px; justify-content:center; align-items:center; margin-bottom:12px; flex-wrap:wrap; }
+  .panel { background:#071028; padding:10px; border-radius:10px; box-shadow:0 6px 20px rgba(0,0,0,0.6); margin:8px auto; width:920px; }
+  canvas{ background:#08121a; display:block; margin:0 auto; border-radius:8px; touch-action:none; }
+  svg{ display:block; margin:0 auto; }
+  label { color:#bfe; font-size:13px; }
+  input[type=range] { width:260px; }
+  button { padding:6px 10px; border-radius:6px; border:none; background:#2a6; color:#032; font-weight:600; cursor:pointer; }
+  button.ghost { background:#0b2340; color:#9ef; border:1px solid rgba(255,255,255,0.06); }
+  .small { font-size:12px; color:#9cc; }
+  .row { display:flex; gap:12px; align-items:center; justify-content:center; margin-top:8px; flex-wrap:wrap; }
+</style>
+</head>
+<body>
+  <h1>Draw a curve → See its Fourier components and reconstruction</h1>
+
+  <div id="controls">
+    <label>Resample points:
+      <input id="nSamples" type="number" min="64" max="2048" step="64" value="512" style="width:90px">
+    </label>
+
+    <label>Coefficients used: <span id="nCoeffsLabel">10</span>
+      <input id="nCoeffs" type="range" min="1" max="100" value="10">
+    </label>
+
+    <label>Order:
+      <select id="orderSelect">
+        <option value="frequency">lowest-frequency first</option>
+        <option value="magnitude">largest-magnitude first</option>
+      </select>
+    </label>
+
+    <button id="clearBtn" class="ghost">Clear</button>
+    <button id="resampleBtn" class="ghost">Resample & Compute</button>
+    <button id="playBtn">Play</button>
+    <div class="small">Tip: Draw with mouse (or touch). Then press <em>Resample & Compute</em>.</div>
+  </div>
+
+  <!-- Drawing panel -->
+  <div class="panel" id="drawingPanel">
+    <div style="text-align:center; color:#bcd; margin-bottom:6px">Edit the curve by dragging the handles </div>
+    <canvas id="drawCanvas" width="880" height="160"></canvas>
+  </div>
+
+  <!-- Reconstruction panel -->
+  <div class="panel" id="reconPanel">
+    <div style="color:#bcd; margin-bottom:6px">Reconstruction</div>
+    <svg id="reconSVG" width="880" height="200"></svg>
+  </div>
+
+  <!-- Components/Spectrum panel -->
+  <div class="panel" id="componentsPanel">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <div style="color:#bcd">
+        <span id="componentsLabel">Fourier components (sinusoids)</span>
+        <span id="spectrumLabel" style="display:none;">Fourier amplitude spectrum</span>
+      </div>
+      <div style="color:#9cc; font-size:12px">Showing up to <span id="showCount">10</span> components</div>
+    </div>
+    <svg id="componentsSVG" width="880" height="200"></svg>
+    <div class="row small">
+      <label><input id="toggleSpectrum" type="checkbox"> Show Spectrum</label>
+    </div>
+  </div>
+
+<script>
+// ----------------------- Utilities -----------------------
+function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+class C { constructor(re,im=0){ this.re = re; this.im = im; }
+  add(b){ return new C(this.re+b.re, this.im + b.im); }
+  sub(b){ return new C(this.re-b.re, this.im - b.im); }
+  mul(b){ return new C(this.re*b.re - this.im*b.im, this.re*b.im + this.im*b.re); }
+  scale(s){ return new C(this.re*s, this.im*s); }
+  conj(){ return new C(this.re, -this.im); }
+  abs(){ return Math.hypot(this.re, this.im); }
+}
+
+// ----------------------- DOM + canvas setup -----------------------
+const drawCanvas = document.getElementById('drawCanvas');
+const dctx = drawCanvas.getContext('2d');
+const componentsSVG = d3.select('#componentsSVG');
+const reconSVG = d3.select('#reconSVG');
+
+const width = +drawCanvas.width, height = +drawCanvas.height;
+dctx.lineCap = 'round'; dctx.lineJoin='round';
+
+// ----------------------- Control Points Drawing System -----------------------
+const NUM_CTRL_POINTS = 20;
+let ctrlPoints = [];
+function defaultCtrlPoints() {
+  // Evenly spaced along x, y at baseline (center)
+  let arr = [];
+  for (let i = 0; i < NUM_CTRL_POINTS; ++i) {
+    let x = i / (NUM_CTRL_POINTS - 1);
+    arr.push({
+      x,
+      y: 0 // normalized y in [-1,1]
+    });
+  }
+  return arr;
+}
+
+ctrlPoints = defaultCtrlPoints();
+
+function clearDrawCanvas() {
+  dctx.clearRect(0, 0, width, height);
+  dctx.fillStyle = '#061226';
+  dctx.fillRect(0, 0, width, height);
+}
+clearDrawCanvas();
+
+function drawCtrlCurve() {
+  clearDrawCanvas();
+  // Draw connecting lines
+  dctx.save();
+  dctx.beginPath();
+  for (let i = 0; i < ctrlPoints.length; ++i) {
+    let px = ctrlPoints[i].x * (width - 1);
+    let py = height / 2 - ctrlPoints[i].y * (height / 2);
+    if (i === 0) dctx.moveTo(px, py);
+    else dctx.lineTo(px, py);
+  }
+  dctx.strokeStyle = '#88f';
+  dctx.lineWidth = 3;
+  dctx.stroke();
+  dctx.restore();
+  // Draw draggable handles
+  for (let i = 0; i < ctrlPoints.length; ++i) {
+    let px = ctrlPoints[i].x * (width - 1);
+    let py = height / 2 - ctrlPoints[i].y * (height / 2);
+    dctx.beginPath();
+    dctx.arc(px, py, 8, 0, 2 * Math.PI);
+    dctx.fillStyle = '#0bf7';
+    dctx.fill();
+    dctx.strokeStyle = '#fff9';
+    dctx.lineWidth = 2;
+    dctx.stroke();
+  }
+}
+
+drawCtrlCurve();
+
+// Drag logic for handles
+let draggingIdx = -1;
+function getHandleAt(x, y) {
+  // Returns index of control point if (x, y) is within handle radius
+  for (let i = 0; i < ctrlPoints.length; ++i) {
+    let px = ctrlPoints[i].x * (width - 1);
+    let py = height / 2 - ctrlPoints[i].y * (height / 2);
+    let dist = Math.hypot(x - px, y - py);
+    if (dist < 13) return i;
+  }
+  return -1;
+}
+
+drawCanvas.addEventListener('pointerdown', (ev) => {
+  ev.preventDefault();
+  const r = drawCanvas.getBoundingClientRect();
+  const x = ev.clientX - r.left;
+  const y = ev.clientY - r.top;
+  const idx = getHandleAt(x, y);
+  if (idx !== -1) {
+    draggingIdx = idx;
+    drawCanvas.setPointerCapture(ev.pointerId);
+  }
+});
+drawCanvas.addEventListener('pointermove', (ev) => {
+  if (draggingIdx === -1) return;
+  const r = drawCanvas.getBoundingClientRect();
+  const y = ev.clientY - r.top;
+  // Only y is draggable
+  let normY = clamp((height / 2 - y) / (height / 2), -1, 1);
+  ctrlPoints[draggingIdx].y = normY;
+  drawCtrlCurve();
+});
+drawCanvas.addEventListener('pointerup', (ev) => {
+  if (draggingIdx !== -1) {
+    draggingIdx = -1;
+    drawCanvas.releasePointerCapture(ev.pointerId);
+    // Optionally: computeAndRender on release
+    // computeAndRender();
+  }
+});
+drawCanvas.addEventListener('pointerleave', (ev) => {
+  draggingIdx = -1;
+});
+drawCanvas.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
+
+// Clear button resets control points to baseline
+document.getElementById('clearBtn').addEventListener('click', () => {
+  ctrlPoints = defaultCtrlPoints();
+  drawCtrlCurve();
+  lastCoeffs = [];
+  lastNorm = [];
+  componentsSVG.selectAll('*').remove();
+  reconSVG.selectAll('*').remove();
+  // Reset spectrum toggle and labels
+  document.getElementById('toggleSpectrum').checked = false;
+  document.getElementById('componentsLabel').style.display = '';
+  document.getElementById('spectrumLabel').style.display = 'none';
+});
+
+// ----------------------- Resample / DFT -----------------------
+// Resample from control points to N samples, using linear interpolation
+function resampleFromCtrlPoints(ctrlPoints, N) {
+  // ctrlPoints: array of {x, y} with x in [0,1], y in [-1,1]
+  // Returns array of length N, values in [-1,1]
+  if (!ctrlPoints || ctrlPoints.length < 2) {
+    return new Array(N).fill(0);
+  }
+  const xs = ctrlPoints.map(p => p.x);
+  const ys = ctrlPoints.map(p => p.y);
+  let result = [];
+  for (let i = 0; i < N; ++i) {
+    let t = i / (N - 1);
+    // Find segment
+    let j = 0;
+    while (j < xs.length - 2 && xs[j + 1] < t) j++;
+    // Linear interp
+    let x0 = xs[j], x1 = xs[j + 1];
+    let y0 = ys[j], y1 = ys[j + 1];
+    let frac = (t - x0) / ((x1 - x0) || 1e-8);
+    result.push(y0 + frac * (y1 - y0));
+  }
+  return result;
+}
+
+// DFT (no FFT library) — returns complex array of length N
+function DFT(x){
+  const N = x.length;
+  const X = new Array(N);
+  for(let k=0;k<N;k++){
+    let re=0, im=0;
+    for(let n=0;n<N;n++){
+      const phi = -2*Math.PI*k*n/N;
+      re += x[n]*Math.cos(phi);
+      im += x[n]*Math.sin(phi);
+    }
+    X[k] = new C(re, im);
+  }
+  return X;
+}
+
+// inverse DFT
+function IDFT(X){
+  const N = X.length;
+  const x = new Array(N);
+  for(let n=0;n<N;n++){
+    let re=0, im=0;
+    for(let k=0;k<N;k++){
+      const phi = 2*Math.PI*k*n/N;
+      re += X[k].re * Math.cos(phi) - X[k].im * Math.sin(phi);
+      im += X[k].re * Math.sin(phi) + X[k].im * Math.cos(phi);
+    }
+    x[n] = re / N; // imag should be ~0
+  }
+  return x;
+}
+
+// Get top coefficients ordering options
+function orderedIndices(N, mode){
+  // mode: 'frequency' returns [0,1,-1,2,-2,...] mapped to 0..N-1 indices
+  // 'magnitude' to be applied after computing magnitudes
+  if(mode==='frequency'){
+    const idx = [0];
+    for(let k=1;k<=Math.floor(N/2);k++){
+      idx.push(k);
+      idx.push(N-k);
+    }
+    return idx.slice(0,N);
+  }
+  return [...Array(N).keys()];
+}
+
+// ----------------------- Visualization helpers -----------------------
+const compW = 880, compH = 200;
+const reconW = 880, reconH = 200;
+
+componentsSVG.selectAll('*').remove();
+reconSVG.selectAll('*').remove();
+
+const compX = d3.scaleLinear().domain([0,1]).range([30, compW-20]);
+const compY = d3.scaleLinear().domain([-1.5,1.5]).range([compH-20, 20]);
+
+const reconX = d3.scaleLinear().domain([0,1]).range([30, reconW-20]);
+const reconY = d3.scaleLinear().domain([-1.5,1.5]).range([reconH-20, 20]);
+
+// axis lines
+componentsSVG.append('g').append('line').attr('x1',compX(0)).attr('x2',compX(1)).attr('y1',compY(0)).attr('y2',compY(0)).attr('stroke','#233');
+reconSVG.append('g').append('line').attr('x1',reconX(0)).attr('x2',reconX(1)).attr('y1',reconY(0)).attr('y2',reconY(0)).attr('stroke','#233');
+
+// path helpers
+function pathFromArray(arr, xScale, yScale){
+  const line = d3.line().x((d,i)=>xScale(i/(arr.length-1))).y((d)=>yScale(d)).curve(d3.curveLinear);
+  return line(arr);
+}
+
+// draw components (individual sinusoids only), or spectrum, depending on toggle
+function renderComponents(coeffsComplex, orderMode, nUse, showSpectrum) {
+  componentsSVG.selectAll('.compGroup').remove();
+  // coeffsComplex length N
+  const N = coeffsComplex.length;
+  // build ordered index list
+  let idxOrder = orderedIndices(N, 'frequency');
+  if (orderMode === 'magnitude') {
+    const mags = coeffsComplex.map(c => c.abs());
+    idxOrder = [...Array(N).keys()].sort((a, b) => mags[b] - mags[a]);
+  }
+  const useIdx = idxOrder.slice(0, nUse);
+
+  if (!showSpectrum) {
+    // Draw individual components (sine/cosine) only (no sum)
+    const compG = componentsSVG.append('g').attr('class', 'compGroup');
+    // Compute maximum amplitude among selected components
+    let maxAmp = 0;
+    for (let j = 0; j < useIdx.length; j++) {
+      const k = useIdx[j];
+      const singleMask = coeffsComplex.map((c, i) => i === k ? c : new C(0, 0));
+      const wave = IDFT(singleMask);
+      const thisAmp = Math.max(...wave.map(Math.abs));
+      if (thisAmp > maxAmp) maxAmp = thisAmp;
+    }
+    // Avoid divide by zero
+    const scale = maxAmp > 1e-8 ? (1 / maxAmp) : 1;
+    for (let j = 0; j < useIdx.length; j++) {
+      const k = useIdx[j];
+      const singleMask = coeffsComplex.map((c, i) => i === k ? c : new C(0, 0));
+      let wave = IDFT(singleMask);
+      // Rescale so largest amplitude fills panel
+      wave = wave.map(v => v * scale);
+      compG.append('path')
+        .attr('d', pathFromArray(wave, compX, compY))
+        .attr('stroke', d3.interpolateRainbow(j / Math.max(1, useIdx.length)))
+        .attr('stroke-width', 2.0)
+        .attr('fill', 'none')
+        .attr('opacity', 0.75);
+    }
+  } else {
+    // Draw amplitude spectrum (bars), but only for lower quarter (N/4) of coefficients
+    const quarter = Math.floor(N / 4);
+    const specX = d3.scaleLinear().domain([0, quarter]).range([60, compW - 40]);
+    const maxY = d3.max(coeffsComplex.slice(0, quarter).map(c => c.abs())) || 1;
+    const specY = d3.scaleLinear().domain([0, maxY]).range([compH - 20, 20]);
+    const bars = componentsSVG.append('g').attr('class', 'compGroup');
+    const barW = Math.max(2, Math.floor((compW - 100) / quarter) - 2);
+    for (let k = 0; k < quarter; k++) {
+      bars.append('rect')
+        .attr('x', specX(k) - barW / 2)
+        .attr('y', specY(coeffsComplex[k].abs()))
+        .attr('width', barW)
+        .attr('height', compH - 20 - specY(coeffsComplex[k].abs()))
+        .attr('fill', useIdx.includes(k) ? '#ffaa33' : '#334');
+    }
+    // Draw axis line
+    bars.append('line')
+      .attr('x1', specX(0)).attr('x2', specX(quarter - 1))
+      .attr('y1', specY(0)).attr('y2', specY(0))
+      .attr('stroke', '#233');
+  }
+}
+
+// draw reconstruction: only the summed reconstructed curve (blue)
+function renderReconOverlay(coeffsComplex, orderMode, nUse) {
+  reconSVG.selectAll('.reconGroup').remove();
+  const N = coeffsComplex.length;
+  let idxOrder = orderedIndices(N, 'frequency');
+  if (orderMode === 'magnitude') {
+    const mags = coeffsComplex.map(c => c.abs());
+    idxOrder = [...Array(N).keys()].sort((a, b) => mags[b] - mags[a]);
+  }
+  // mask
+  const useIdx = idxOrder.slice(0, nUse);
+  const masked = coeffsComplex.map((c, i) => useIdx.includes(i) ? c : new C(0, 0));
+  const recon = IDFT(masked); // normalized values
+  // draw recon (blue)
+  reconSVG.append('path').attr('class', 'reconGroup').attr('d', pathFromArray(recon, reconX, reconY))
+    .attr('stroke', '#55aaff').attr('stroke-width', 2).attr('fill', 'none').attr('opacity', 0.97);
+}
+
+// ----------------------- Top-level compute & render -----------------------
+let lastCoeffs = [];
+function computeAndRender() {
+  nSamples = +document.getElementById('nSamples').value;
+  // Get normalized y values from control points
+  const norm = resampleFromCtrlPoints(ctrlPoints, nSamples);
+  // compute DFT
+  const coeffs = DFT(norm); // length N
+  lastCoeffs = coeffs;
+  // update sliders bounds
+  const nCoeffsRange = document.getElementById('nCoeffs');
+  nCoeffsRange.max = Math.min(Math.floor(nSamples / 2), 200);
+  // draw components/spectrum
+  const nUse = +document.getElementById('nCoeffs').value;
+  const orderMode = document.getElementById('orderSelect').value;
+  const showSpectrum = document.getElementById('toggleSpectrum').checked;
+  // update panel labels
+  document.getElementById('componentsLabel').style.display = showSpectrum ? 'none' : '';
+  document.getElementById('spectrumLabel').style.display = showSpectrum ? '' : 'none';
+  renderComponents(coeffs, orderMode, nUse, showSpectrum);
+  renderReconOverlay(coeffs, orderMode, nUse);
+}
+
+// UI events
+document.getElementById('resampleBtn').addEventListener('click', () => { computeAndRender(); });
+document.getElementById('nSamples').addEventListener('change', () => { /* no auto */ });
+const nCoeffsInput = document.getElementById('nCoeffs');
+nCoeffsInput.addEventListener('input', () => {
+  document.getElementById('nCoeffsLabel').textContent = nCoeffsInput.value;
+  document.getElementById('showCount').textContent = nCoeffsInput.value;
+  if (lastCoeffs.length) computeAndRender();
+});
+document.getElementById('orderSelect').addEventListener('change', () => { if (lastCoeffs.length) computeAndRender(); });
+document.getElementById('toggleSpectrum').addEventListener('change', () => { if (lastCoeffs.length) computeAndRender(); });
+
+// initial small example curve (sine-ish) to show
+(function seedExample() {
+  // Use control points: y = 0.3*sin(2πx*2) + 0.08*sin(2πx*6)
+  ctrlPoints = [];
+  for (let i = 0; i < NUM_CTRL_POINTS; ++i) {
+    let x = i / (NUM_CTRL_POINTS - 1);
+    let y = 0.3 * Math.sin(2 * Math.PI * x * 2) + 0.08 * Math.sin(2 * Math.PI * x * 6);
+    ctrlPoints.push({ x, y });
+  }
+  drawCtrlCurve();
+  computeAndRender();
+})();
+
+// ----------------------- Play animation (build reconstruction progressively) -----------------------
+let playing = false, playIdx = 1, playMode = 'frequency';
+const playBtn = document.getElementById('playBtn');
+playBtn.addEventListener('click', () => {
+  if (!lastCoeffs.length) return;
+  playing = !playing;
+  playBtn.textContent = playing ? 'Pause' : 'Play';
+  if (playing) {
+    playIdx = 1;
+    animatePlay();
+  }
+});
+async function animatePlay() {
+  const mode = document.getElementById('orderSelect').value;
+  const max = +document.getElementById('nCoeffs').max || Math.floor(lastCoeffs.length / 2);
+  const target = +document.getElementById('nCoeffs').value;
+  while (playing && playIdx <= target) {
+    document.getElementById('nCoeffs').value = playIdx;
+    document.getElementById('nCoeffsLabel').textContent = playIdx;
+    document.getElementById('showCount').textContent = playIdx;
+    computeAndRender();
+    await new Promise(r => setTimeout(r, 120));
+    playIdx++;
+  }
+  playing = false;
+  playBtn.textContent = 'Play';
+}
+
+// ----------------------- Rendering convenience (on window resize etc) -----------------------
+window.addEventListener('resize', () => { /* nothing heavy for this prototype */ });
+
+</script>
+</body>
+</html>

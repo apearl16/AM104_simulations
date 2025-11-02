@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>3D Cubic Magnitude Surface</title>
+  <script src="https://cdn.plot.ly/plotly-2.31.1.min.js"></script>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    #sliders { display: flex; flex-wrap: wrap; gap: 20px; margin-bottom: 20px; }
+    .slider-group { display: flex; flex-direction: column; width: 150px; }
+    label { font-weight: bold; margin-bottom: 5px; }
+  </style>
+</head>
+<body>
+  <h2>Surface Plot of \( |f(z)| = |a z³ + b z² + c z + d| \)</h2>
+  <div id="sliders"></div>
+  <div id="plot" style="width:900px;height:700px;"></div>
+
+  <script>
+    // --- Parameter setup ---
+    let params = { a: 1.0, b: 0.0, c: -4.0, d: 1.0 };
+
+    const ranges = {
+      a: [-3, 3], b: [-5, 5], c: [-10, 10], d: [-10, 10]
+    };
+
+    // --- D3 UI creation ---
+    const sliderDiv = d3.select("#sliders");
+    for (const [key, [min, max]] of Object.entries(ranges)) {
+      const group = sliderDiv.append("div").attr("class", "slider-group");
+      group.append("label").text(key + ": " + params[key].toFixed(2));
+      const input = group.append("input")
+        .attr("type", "range")
+        .attr("min", min)
+        .attr("max", max)
+        .attr("step", 0.1)
+        .attr("value", params[key])
+        .on("input", (event) => {
+          params[key] = parseFloat(event.target.value);
+          group.select("label").text(key + ": " + params[key].toFixed(2));
+          updatePlot();
+        });
+    }
+
+    function complexAbs(zr, zi) {
+      return Math.sqrt(zr * zr + zi * zi);
+    }
+
+    function updatePlot() {
+      const { a, b, c, d } = params;
+
+      const x = d3.range(-5, 5.2, 0.2);
+      const y = d3.range(-5, 5.2, 0.2);
+      const z = [];
+
+      for (let yi of y) {
+        const row = [];
+        for (let xi of x) {
+          const zr = xi, zi = yi;
+          const fzr = a * (zr ** 3 - 3 * zr * zi ** 2)
+                    + b * (zr ** 2 - zi ** 2)
+                    + c * zr + d;
+          const fzi = a * (3 * zr ** 2 * zi - zi ** 3)
+                    + b * (2 * zr * zi)
+                    + c * 0;
+          row.push(Math.sqrt(fzr ** 2 + fzi ** 2));
+        }
+        z.push(row);
+      }
+
+      // --- Compute real roots ---
+      const roots = cubicRoots(a, b, c, d);
+      const roots_x = roots.map(r => r.re);
+      const roots_y = roots.map(r => r.im);
+
+      const surface = {
+        x, y, z,
+        type: 'surface',
+        colorscale: 'Plasma',
+        opacity: 0.8,
+        colorbar: {
+            len: 0.6,          // shorten the colorbar (default is 1.0)
+            y: 0.5,            // move it up slightly
+            x: 1.05,           // move it right so it doesn’t overlap the legend
+            thickness: 15,     // make it slimmer
+            title: '|f(z)|'
+        }
+        };
+
+      const plane = {
+        x: [-5, 5],
+        y: [0, 0],
+        z: [[0, Math.max(...z.flat())], [0, Math.max(...z.flat())]],
+        type: 'surface',
+        opacity: 0.2,
+        showscale: false,
+        colorscale: [[0, 'cyan'], [1, 'cyan']]
+      };
+
+      const realSlice = {
+        x: x,
+        y: Array(x.length).fill(0),
+        z: x.map(xi => Math.abs(a * xi ** 3 + b * xi ** 2 + c * xi + d)),
+        mode: 'lines',
+        line: { color: 'blue', width: 5 },
+        type: 'scatter3d',
+        name: 'Real Slice'
+      };
+
+      const rootPoints = {
+        x: roots_x,
+        y: roots_y,
+        z: Array(roots_x.length).fill(0),
+        mode: 'markers',
+        marker: { color: 'red', size: 6 },
+        type: 'scatter3d',
+        name: 'Roots'
+      };
+
+      const layout = {
+        scene: {
+          xaxis: { title: 'Real Axis' },
+          yaxis: { title: 'Imag Axis' },
+          zaxis: { title: '|f(z)|' }
+        },
+        margin: { l: 0, r: 0, t: 40, b: 0 },
+        showlegend: true
+      };
+
+      Plotly.newPlot('plot', [surface, plane, realSlice, rootPoints], layout);
+    }
+
+    // --- Helper: cubic roots via Cardano's method ---
+    function cubicRoots(a, b, c, d) {
+      if (Math.abs(a) < 1e-6) a = 1e-6;
+      const A = b / a, B = c / a, C = d / a;
+      const Q = (3*B - A*A) / 9;
+      const R = (9*A*B - 27*C - 2*A*A*A) / 54;
+      const D = Q*Q*Q + R*R;
+      const roots = [];
+
+      if (D >= 0) {
+        const S = Math.cbrt(R + Math.sqrt(D));
+        const T = Math.cbrt(R - Math.sqrt(D));
+        roots.push({ re: -A/3 + (S + T), im: 0 });
+        const rePart = -A/3 - (S + T)/2;
+        const imPart = Math.sqrt(3)/2 * (S - T);
+        roots.push({ re: rePart, im: imPart });
+        roots.push({ re: rePart, im: -imPart });
+      } else {
+        const theta = Math.acos(R / Math.sqrt(-Q*Q*Q));
+        const r = 2 * Math.sqrt(-Q);
+        roots.push({ re: r * Math.cos(theta/3) - A/3, im: 0 });
+        roots.push({ re: r * Math.cos((theta + 2*Math.PI)/3) - A/3, im: 0 });
+        roots.push({ re: r * Math.cos((theta + 4*Math.PI)/3) - A/3, im: 0 });
+      }
+      return roots;
+    }
+
+    updatePlot();
+  </script>
+</body>
+</html>

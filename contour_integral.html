@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Complex Integral Visualizer</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+  body {
+    font-family: sans-serif;
+    background: #111;
+    color: #eee;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    height: 100vh;
+    margin: 0;
+  }
+  #controls { margin-bottom: 10px; }
+  #container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin: 50px auto;
+    position: relative;
+    width: 100%;
+    height: 100vh;
+  }
+  canvas, svg { border-radius: 12px; box-shadow: 0 0 20px #000; }
+  select { padding: 6px; font-size: 16px; border-radius: 6px; margin: 0 6px; }
+  .point { cursor: move; stroke: #fff; stroke-width: 2; }
+  #info { margin-top: 420px; font-size: 18px; position: absolute; left: 50%; transform: translateX(-50%); }
+</style>
+</head>
+<body>
+<h2>Interactive Complex Line Integral</h2>
+
+<div id="controls">
+  <label>Function:</label>
+  <select id="functionSelect">
+    <option value="z">f(z) = z</option>
+    <option value="z2">f(z) = z²</option>
+    <option value="exp">f(z) = e^z</option>
+    <option value="inv">f(z) = 1/z</option>
+    <option value="sin">f(z) = sin(z)</option>
+    <option value="cos">f(z) = cos(z)</option>
+  </select>
+
+  <label>Contour:</label>
+  <select id="contourSelect">
+    <option value="line">Line</option>
+    <option value="circle">Circle</option>
+    <option value="arc">Arc</option>
+  </select>
+</div>
+
+<div id="container">
+  <canvas id="domain" width="400" height="400" style="position:absolute; left:0; top:0;"></canvas>
+  <svg id="overlay" width="400" height="400" style="position:absolute; left:0; top:0;"></svg>
+  <div id="info">Integral: <span id="integralValue"></span></div>
+</div>
+
+<script>
+// ---------- Complex arithmetic ----------
+class Complex {
+  constructor(re, im){ this.re = re; this.im = im; }
+  add(b){ return new Complex(this.re + b.re, this.im + b.im); }
+  sub(b){ return new Complex(this.re - b.re, this.im - b.im); }
+  mul(b){ return new Complex(this.re*b.re - this.im*b.im, this.re*b.im + this.im*b.re); }
+  div(b){ const d = b.re*b.re + b.im*b.im; return new Complex((this.re*b.re + this.im*b.im)/d, (this.im*b.re - this.re*b.im)/d); }
+  abs(){ return Math.hypot(this.re, this.im); }
+  arg(){ return Math.atan2(this.im, this.re); }
+}
+
+// ---------- Analytic functions ----------
+function f(z, type){
+  switch(type){
+    case "z": return z;
+    case "z2": return new Complex(z.re*z.re - z.im*z.im, 2*z.re*z.im);
+    case "exp": return new Complex(Math.exp(z.re)*Math.cos(z.im), Math.exp(z.re)*Math.sin(z.im));
+    case "inv": {
+      const d = z.re*z.re + z.im*z.im;
+      return new Complex(z.re/d, -z.im/d);
+    }
+    case "sin": return new Complex(Math.sin(z.re)*Math.cosh(z.im), Math.cos(z.re)*Math.sinh(z.im));
+    case "cos": return new Complex(Math.cos(z.re)*Math.cosh(z.im), -Math.sin(z.re)*Math.sinh(z.im));
+  }
+}
+
+// ---------- Domain coloring ----------
+function colorFor(w){
+  const arg = w.arg();
+  const hue = (arg / Math.PI * 180 + 180) % 360;
+  const mag = w.abs();
+  const sat = 100;
+  const light = 50 - 20*Math.tanh(Math.log10(mag+1));
+  return d3.hsl(hue, sat/100, light/100).formatHex();
+}
+
+function drawDomain(ctx, funcType, size=2){
+  const w = ctx.canvas.width, h = ctx.canvas.height;
+  const img = ctx.createImageData(w, h);
+  const scale = size;
+  let i = 0;
+  for(let y=0; y<h; y++){
+    const im = scale*(h/2 - y)/(h/2);
+    for(let x=0; x<w; x++){
+      const re = scale*(x - w/2)/(w/2);
+      const z = new Complex(re, im);
+      const col = d3.color(colorFor(f(z, funcType)));
+      img.data[i++] = col.r;
+      img.data[i++] = col.g;
+      img.data[i++] = col.b;
+      img.data[i++] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+// ---------- Integral computation ----------
+function integratePoints(pts, funcType){
+  let I = new Complex(0,0);
+  for(let i=1;i<pts.length;i++){
+    const z1 = pts[i-1], z2 = pts[i];
+    const dz = z2.sub(z1);
+    const avg = f(z1, funcType).add(f(z2, funcType)).mul(new Complex(0.5,0));
+    I = I.add(avg.mul(dz));
+  }
+  return I;
+}
+
+// ---------- Global state ----------
+const width = 400, height = 400, scale = 150;
+const domainCtx = document.getElementById("domain").getContext("2d");
+const svg = d3.select("#overlay");
+drawDomain(domainCtx, "z");
+
+let funcType = "z";
+let contourType = "line";
+let A = {x: 150, y: 200};
+let B = {x: 250, y: 200};
+let center = {x: 200, y: 200};
+let radius = 80;
+// Ensure C is initialized globally for arc control
+let C = { x: (A.x + B.x)/2, y: (A.y + B.y)/2 };
+
+// ---------- Path generators ----------
+function linePath(){
+  const N=200, pts=[];
+  const z1 = new Complex((A.x-width/2)/scale, (height/2 - A.y)/scale);
+  const z2 = new Complex((B.x-width/2)/scale, (height/2 - B.y)/scale);
+  for(let i=0;i<=N;i++){
+    const t=i/N;
+    pts.push(new Complex(z1.re+(z2.re-z1.re)*t, z1.im+(z2.im-z1.im)*t));
+  }
+  return pts;
+}
+
+function circlePath(){
+  const N=300, pts=[];
+  const cx = (center.x-width/2)/scale, cy = (height/2-center.y)/scale;
+  const r = radius/scale;
+  for(let i=0;i<=N;i++){
+    const t=2*Math.PI*i/N;
+    pts.push(new Complex(cx+r*Math.cos(t), cy+r*Math.sin(t)));
+  }
+  return pts;
+}
+
+function arcPath(){
+  const z1 = new Complex((A.x-width/2)/scale, (height/2 - A.y)/scale);
+  const z2 = new Complex((B.x-width/2)/scale, (height/2 - B.y)/scale);
+  const cx = (center.x-width/2)/scale, cy = (height/2-center.y)/scale;
+  const N=200, pts=[];
+  const a1 = Math.atan2(z1.im-cy, z1.re-cx);
+  const a2 = Math.atan2(z2.im-cy, z2.re-cx);
+  const r = Math.hypot(z1.re-cx, z1.im-cy);
+  for(let i=0;i<=N;i++){
+    const t=a1+(a2-a1)*i/N;
+    pts.push(new Complex(cx+r*Math.cos(t), cy+r*Math.sin(t)));
+  }
+  return pts;
+}
+
+function computeCircleThroughPoints(A, B, C) {
+  const x1 = A.x, y1 = A.y, x2 = B.x, y2 = B.y, x3 = C.x, y3 = C.y;
+  const a = x1 * (y2 - y3) - y1 * (x2 - x3) + x2 * y3 - x3 * y2;
+  if (Math.abs(a) < 1e-6) return null; // points nearly collinear
+  const b = (x1**2 + y1**2)*(y3 - y2) + (x2**2 + y2**2)*(y1 - y3) + (x3**2 + y3**2)*(y2 - y1);
+  const c = (x1**2 + y1**2)*(x2 - x3) + (x2**2 + y2**2)*(x3 - x1) + (x3**2 + y3**2)*(x1 - x2);
+  const cx = -b / (2*a);
+  const cy = -c / (2*a);
+  const r = Math.hypot(x1 - cx, y1 - cy);
+  const startAngle = Math.atan2(y1 - cy, x1 - cx);
+  const endAngle = Math.atan2(y3 - cy, x3 - cx);
+  const sweepFlag = ((x2 - x1)*(y3 - y1) - (y2 - y1)*(x3 - x1)) > 0 ? 1 : 0;
+  return { cx, cy, r, startAngle, endAngle, sweepFlag };
+}
+
+function integratePoints(points, funcType) {
+  let I = new Complex(0, 0);
+  for (let i = 1; i < points.length; i++) {
+    const f1 = f(points[i - 1], funcType);
+    const f2 = f(points[i], funcType);
+    const dz = points[i].sub(points[i - 1]);
+    const avg = f1.add(f2).mul(new Complex(0.5, 0));
+    I = I.add(avg.mul(dz));
+  }
+  return I;
+}
+// ---------- Draw and update ----------
+function update() {
+  svg.selectAll("*").remove();
+
+  // Draw contour depending on mode
+  const contourType = d3.select("#contourSelect").node()
+    ? d3.select("#contourSelect").node().value
+    : "line"; // default
+
+  let path;
+  if (contourType === "line") {
+    // Straight line between A and B
+    path = `M${A.x},${A.y} L${B.x},${B.y}`;
+  } 
+  else if (contourType === "circle") {
+    // Circle centered at C with radius r
+    const dx = B.x - A.x, dy = B.y - A.y;
+    const r = Math.hypot(dx, dy);
+    path = d3.path();
+    path.arc(A.x, A.y, r, 0, 2 * Math.PI);
+  } 
+  else if (contourType === "arc") {
+    // Arc determined by 3 draggable points: A, C, B
+    const circleData = computeCircleThroughPoints(A, C, B);
+    if (circleData) {
+      const { cx, cy, r, startAngle, endAngle, sweepFlag } = circleData;
+      const largeArcFlag = Math.abs(endAngle - startAngle) > Math.PI ? 1 : 0;
+      // SVG arc: A rx,ry x-axis-rotation large-arc-flag sweep-flag x,y
+      path = `M${A.x},${A.y} A${r},${r} 0 ${largeArcFlag} ${sweepFlag} ${B.x},${B.y}`;
+    }
+  }
+
+  // Draw the contour path
+  if (path) {
+    svg.append("path")
+      .attr("d", path.toString ? path.toString() : path)
+      .attr("fill", "none")
+      .attr("stroke", "white")
+      .attr("stroke-width", 2);
+  }
+
+  // ✅ FIXED: Draw points properly attached to endpoints
+  let points = [A, B];
+  if (contourType === "arc") points = [A, C, B]; // include mid control point
+
+  svg.selectAll(".point")
+    .data(points)
+    .join("circle")
+    .attr("class", "point")
+    .attr("r", 8)
+    .attr("fill", "orange")
+    .attr("stroke", "white")
+    .attr("stroke-width", 2)
+    .attr("cx", d => d.x)
+    .attr("cy", d => d.y)
+    .call(
+      d3.drag().on("drag", function (event, d) {
+        d.x = Math.max(0, Math.min(width, event.x));
+        d.y = Math.max(0, Math.min(height, event.y));
+        update(); // recompute everything live
+      })
+    );
+
+  // ---------- Compute integral numerically ----------
+  const N = 400;
+  let integral = new Complex(0, 0);
+
+  if (contourType === "line") {
+    const z1 = new Complex((A.x - width / 2) / scale, (height / 2 - A.y) / scale);
+    const z2 = new Complex((B.x - width / 2) / scale, (height / 2 - B.y) / scale);
+    const linePts = [];
+    for(let i=0;i<=N;i++){
+      const t=i/N;
+      linePts.push(new Complex(z1.re + t*(z2.re-z1.re), z1.im + t*(z2.im-z1.im)));
+    }
+    integral = integratePoints(linePts, funcType);
+  } 
+  else if (contourType === "circle") {
+    const center = new Complex((A.x - width / 2) / scale, (height / 2 - A.y) / scale);
+    const radius = Math.hypot(B.x - A.x, B.y - A.y) / scale;
+    const points = [];
+    for (let i = 0; i <= N; i++) {
+      const t = (2 * Math.PI * i) / N;
+      points.push(new Complex(center.re + radius * Math.cos(t), center.im + radius * Math.sin(t)));
+    }
+    integral = integratePoints(points, funcType);
+  } 
+  else if (contourType === "arc" && C) {
+    const circle = computeCircleThroughPoints(A, C, B);
+    if (circle) {
+      const { cx, cy, r, startAngle, endAngle, sweepFlag } = circle;
+      const step = (endAngle - startAngle) / N;
+      const pts = [];
+      for (let i = 0; i <= N; i++) {
+        const θ = startAngle + i * step;
+        pts.push(new Complex((cx - width / 2) / scale + (r / scale) * Math.cos(θ),
+                             (height / 2 - cy) / scale + (r / scale) * Math.sin(θ)));
+      }
+      integral = integratePoints(pts, funcType);
+    }
+  }
+
+  // ---------- Display integral ----------
+  d3.select("#integralValue")
+    .text(`≈ ${integral.re.toFixed(4)} + ${integral.im.toFixed(4)}i`);
+}
+
+d3.select("#functionSelect").on("change", e=>{
+  funcType = e.target.value;
+  drawDomain(domainCtx, funcType);
+  update();
+});
+
+d3.select("#contourSelect").on("change", e=>{
+  contourType = e.target.value;
+  update();
+});
+
+update();
+</script>
+</body>
+</html>

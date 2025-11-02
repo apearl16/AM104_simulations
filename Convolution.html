@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>D3 Convolution Visualizer (Final Fixes)</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      background: #f8f9fa;
+      margin: 40px;
+      color: #222;
+    }
+    h2 { text-align: center; margin-bottom: 20px; }
+    svg {
+      overflow: visible;
+      display: block;
+      margin: 25px auto;
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      align-items: center;
+      gap: 1em;
+      margin-bottom: 10px;
+    }
+    label { font-weight: 600; }
+    .slider { width: 400px; }
+  </style>
+</head>
+<body>
+  <h2>Interactive Convolution Visualization</h2>
+
+  <div class="controls">
+    <label>f(x):</label>
+    <select id="f-select">
+      <option value="rect">Rectangular Pulse</option>
+      <option value="step">Step Function</option>
+      <option value="ramp">Ramp</option>
+      <option value="gauss">Gaussian</option>
+      <option value="exp">Exponential Decay</option>
+    </select>
+
+    <label>g(x):</label>
+    <select id="g-select">
+      <option value="rect">Rectangular Pulse</option>
+      <option value="step">Step Function</option>
+      <option value="ramp">Ramp</option>
+      <option value="gauss" selected>Gaussian</option>
+      <option value="exp">Exponential Decay</option>
+    </select>
+
+    <label>
+      <input type="checkbox" id="show-area" checked>
+      Show product area
+    </label>
+  </div>
+
+  <div class="controls">
+    <label>Shift (t):</label>
+    <input type="range" id="t-slider" min="0" max="20" step="0.1" value="0" class="slider">
+    <span id="t-value">t = 0.0</span>
+  </div>
+
+  <svg id="top-plot" width="900" height="340"></svg>
+  <svg id="bottom-plot" width="900" height="280"></svg>
+
+  <script>
+    const width = 900, height1 = 340, height2 = 280;
+    const x = d3.scaleLinear().domain([0, 20]).range([60, width - 40]);
+    const yTop = d3.scaleLinear().domain([-0.5, 3.5]).range([height1 - 50, 30]);
+    const yBottom = d3.scaleLinear().domain([0, 2.5]).range([height2 - 50, 30]);
+
+    const svg1 = d3.select("#top-plot");
+    const svg2 = d3.select("#bottom-plot");
+
+    // Axes
+    svg1.append("g")
+        .attr("transform", `translate(0,${yTop(0)})`)
+        .call(d3.axisBottom(x));
+    svg1.append("g")
+        .attr("transform", `translate(${x(0)},0)`)
+        .attr("class", "y-axis-top")
+        .call(d3.axisLeft(yTop));
+    svg2.append("g")
+        .attr("transform", `translate(0,${yBottom(0)})`)
+        .call(d3.axisBottom(x));
+    svg2.append("g")
+        .attr("transform", `translate(${x(0)},0)`)
+        .attr("class", "y-axis-bottom")
+        .call(d3.axisLeft(yBottom));
+
+    // Function definitions
+    const funcs = {
+      rect: x => (x > 2 && x < 6 ? 1 : 0),
+      step: x => (x > 4 ? 1 : 0),
+      ramp: x => (x > 0 ? Math.min(x / 5, 2) : 0),
+      gauss: x => 2 * Math.exp(-Math.pow(x - 5, 2)),
+      exp: x => (x > 0 ? 2 * Math.exp(-0.5 * x) : 0)
+    };
+
+    const xs = d3.range(0, 20.1, 0.1);
+    const lineTop = d3.line().x(d => x(d.x)).y(d => yTop(d.y));
+    const lineBottom = d3.line().x(d => x(d.x)).y(d => yBottom(d.y));
+
+    let fType = "rect", gType = "gauss";
+    let t = 0, prevT = 0;
+    let convData = [];
+    let showArea = true;
+
+    function computeConvAtT(t) {
+      const f = xs.map(xv => funcs[fType](xv));
+      const g = xs.map(xv => funcs[gType](t - xv));
+      const prod = f.map((fv, i) => fv * g[i]);
+      return d3.sum(prod) * 0.1;
+    }
+
+    function updatePlots() {
+      const f = xs.map(xv => ({x: xv, y: funcs[fType](xv)}));
+      const g = xs.map(xv => ({x: xv, y: funcs[gType](t - xv)}));
+      const prod = xs.map((xv, i) => ({x: xv, y: f[i].y * g[i].y}));
+
+      svg1.selectAll(".plot").remove();
+
+      // f(x)
+      svg1.append("path").datum(f)
+        .attr("class", "plot").attr("fill", "none")
+        .attr("stroke", "orange").attr("stroke-width", 2)
+        .attr("d", lineTop);
+
+      // g(t-x)
+      svg1.append("path").datum(g)
+        .attr("class", "plot").attr("fill", "none")
+        .attr("stroke", "green").attr("stroke-width", 2)
+        .attr("d", lineTop);
+
+      // Product area shading — fully visible down to y=0
+      if (showArea) {
+        const area = d3.area()
+          .x(d => x(d.x))
+          .y0(yTop(0))
+          .y1(d => yTop(Math.max(0, d.y)));
+
+        svg1.append("path")
+          .datum(prod)
+          .attr("class", "plot")
+          .attr("fill", "rgba(0,0,255,0.15)")
+          .attr("stroke", "blue")
+          .attr("stroke-width", 1)
+          .attr("d", area);
+      }
+
+      // Update bottom convolution
+      const maxY = d3.max(convData, d => d.y) || 1;
+      yBottom.domain([0, Math.max(2, maxY * 1.1)]);
+      svg2.select(".y-axis-bottom").remove();
+      svg2.append("g")
+        .attr("class", "y-axis-bottom")
+        .attr("transform", `translate(${x(0)},0)`)
+        .call(d3.axisLeft(yBottom));
+
+      svg2.selectAll(".conv").remove();
+      svg2.append("path").datum(convData)
+        .attr("class", "conv")
+        .attr("fill", "none")
+        .attr("stroke", "purple")
+        .attr("stroke-width", 2)
+        .attr("d", lineBottom);
+    }
+
+    function handleSlider(newT) {
+      const direction = newT > prevT ? "right" : "left";
+      const area = computeConvAtT(newT);
+
+      if (direction === "right") {
+        convData = convData.filter(d => d.x <= newT);
+        convData.push({x: newT, y: area});
+      } else {
+        convData = convData.filter(d => d.x <= newT);
+      }
+
+      t = newT;
+      updatePlots();
+      d3.select("#t-value").text(`t = ${t.toFixed(1)}`);
+      prevT = newT;
+    }
+
+    // Event listeners
+    d3.select("#t-slider").on("input", function() {
+      handleSlider(+this.value);
+    });
+
+    d3.select("#f-select").on("change", function() {
+      fType = this.value;
+      convData = [];
+      t = 0; prevT = 0;
+      d3.select("#t-slider").property("value", 0);
+      d3.select("#t-value").text("t = 0.0");
+      updatePlots();
+    });
+
+    d3.select("#g-select").on("change", function() {
+      gType = this.value;
+      convData = [];
+      t = 0; prevT = 0;
+      d3.select("#t-slider").property("value", 0);
+      d3.select("#t-value").text("t = 0.0");
+      updatePlots();
+    });
+
+    d3.select("#show-area").on("change", function() {
+      showArea = this.checked;
+      updatePlots();
+    });
+
+    // Initial render
+    updatePlots();
+  </script>
+</body>
+</html>

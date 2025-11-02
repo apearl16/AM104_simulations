@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aliasing & Nyquist Demonstration</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    body {
+      font-family: sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+    }
+    svg {
+      background: #fafafa;
+      border-radius: 12px;
+      margin-top: 10px;
+      box-shadow: 0 0 5px rgba(0,0,0,0.1);
+    }
+    #warning {
+      color: red;
+      font-weight: bold;
+      margin-top: 10px;
+    }
+    h2 {
+      margin-bottom: 5px;
+      margin-top: 20px;
+    }
+    .axis-label {
+      font-size: 12px;
+      fill: #333;
+    }
+  </style>
+</head>
+<body>
+  <h1>Aliasing and the Shannon–Nyquist Sampling Theorem</h1>
+
+  <div style="margin-bottom:10px;">
+    <label for="signalFreq">Signal frequency:</label>
+    <input id="signalFreq" type="range" min="2" max="20" value="10" step="0.1" style="width:300px">
+    <input id="signalFreqValue" type="number" min="2" max="20" value="10" step="0.1">
+  </div>
+
+  <div style="margin-bottom:10px;">
+    <label for="sampling">Sampling frequency:</label>
+    <input id="sampling" type="range" min="2" max="40" value="15" step="0.1" style="width:300px">
+    <input id="samplingValue" type="number" min="2" max="40" value="15" step="0.1">
+  </div>
+
+  <div id="warning"></div>
+
+  <h2>Original Wave</h2>
+  <svg id="signal" width="800" height="260"></svg>
+
+  <h2>Reconstructed Wave</h2>
+  <svg id="reconstructed" width="800" height="260"></svg>
+
+  <script>
+    const svgWidth = 800, svgHeight = 260;
+    const margin = {top: 20, right: 20, bottom: 40, left: 50};
+    const width = svgWidth - margin.left - margin.right;
+    const height = svgHeight - margin.top - margin.bottom;
+
+    const x = d3.scaleLinear().domain([0, 1]).range([0, width]);
+    const y = d3.scaleLinear().domain([-1.2, 1.2]).range([height, 0]);
+
+    const svgSig = d3.select("#signal")
+      .append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+    const svgRec = d3.select("#reconstructed")
+      .append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+
+    svgSig.append("g").attr("transform", `translate(0,${height})`).call(d3.axisBottom(x));
+    svgSig.append("g").call(d3.axisLeft(y));
+    svgSig.append("text").attr("class", "axis-label").attr("x", width/2).attr("y", height+35).attr("text-anchor", "middle").text("Time (s)");
+    svgSig.append("text").attr("class", "axis-label").attr("transform", "rotate(-90)").attr("x", -height/2).attr("y", -35).attr("text-anchor", "middle").text("Amplitude");
+
+    svgRec.append("g").attr("transform", `translate(0,${height})`).call(d3.axisBottom(x));
+    svgRec.append("g").call(d3.axisLeft(y));
+    svgRec.append("text").attr("class", "axis-label").attr("x", width/2).attr("y", height+35).attr("text-anchor", "middle").text("Time (s)");
+    svgRec.append("text").attr("class", "axis-label").attr("transform", "rotate(-90)").attr("x", -height/2).attr("y", -35).attr("text-anchor", "middle").text("Amplitude");
+
+    const line = d3.line()
+      .x(d => x(d.t))
+      .y(d => y(d.value));
+
+    const nPoints = 1000;
+    const t = d3.range(nPoints).map(i => i/nPoints);
+
+    const signalPath = svgSig.append("path").attr("fill", "none").attr("stroke", "steelblue").attr("stroke-width", 2);
+    const recPath = svgRec.append("path").attr("fill", "none").attr("stroke", "orange").attr("stroke-width", 2);
+
+    const samplesTop = svgSig.append("g");
+    const samplesBottom = svgRec.append("g");
+
+    const update = (fs, f0) => {
+      const omega = 2 * Math.PI * f0;
+      const signal = t.map(tt => ({t: tt, value: Math.sin(omega * tt)}));
+      signalPath.attr("d", line(signal));
+
+      const sampleTimes = d3.range(0, 1, 1/fs);
+      const samples = sampleTimes.map(tt => ({t: tt, value: Math.sin(omega * tt)}));
+
+      samplesTop.selectAll("circle").data(samples)
+        .join("circle")
+        .attr("cx", d => x(d.t))
+        .attr("cy", d => y(d.value))
+        .attr("r", 5)
+        .attr("fill", "red");
+
+      samplesBottom.selectAll("circle").data(samples)
+        .join("circle")
+        .attr("cx", d => x(d.t))
+        .attr("cy", d => y(d.value))
+        .attr("r", 5)
+        .attr("fill", "red");
+
+      const reconstructed = t.map(tt => {
+        let sum = 0;
+        samples.forEach(s => {
+          const sinc = fs * (Math.sin(Math.PI * fs * (tt - s.t)) / (Math.PI * fs * (tt - s.t)));
+          sum += s.value * (isNaN(sinc) ? 1 : sinc);
+        });
+        return {t: tt, value: sum / samples.length};
+      });
+
+      recPath.attr("d", line(reconstructed));
+
+      const warning = document.getElementById("warning");
+      if (fs < 2 * f0) {
+        warning.textContent = "Sampling frequency < 2× signal frequency! ⚠️";
+      } else {
+        warning.textContent = "";
+      }
+    };
+
+    const samplingSlider = document.getElementById("sampling");
+    const samplingInput = document.getElementById("samplingValue");
+    const freqSlider = document.getElementById("signalFreq");
+    const freqInput = document.getElementById("signalFreqValue");
+
+    const syncUpdate = () => {
+      const fs = +samplingSlider.value;
+      const f0 = +freqSlider.value;
+      update(fs, f0);
+    };
+
+    samplingSlider.addEventListener("input", e => {
+      samplingInput.value = e.target.value;
+      syncUpdate();
+    });
+    samplingInput.addEventListener("input", e => {
+      samplingSlider.value = e.target.value;
+      syncUpdate();
+    });
+
+    freqSlider.addEventListener("input", e => {
+      freqInput.value = e.target.value;
+      syncUpdate();
+    });
+    freqInput.addEventListener("input", e => {
+      freqSlider.value = e.target.value;
+      syncUpdate();
+    });
+
+    update(+samplingSlider.value, +freqSlider.value);
+  </script>
+</body>
+</html>
