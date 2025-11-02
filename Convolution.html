@@ -5,7 +5,7 @@
 <nav>
   <a href="CubicRoots.html">Roots of a cubic</a>
   <a href="Conformal.html">Conformal maps</a>
-  <a href="countour_integral.html">Complex integrals</a>
+  <a href="contour_integral.html">Complex integrals</a>
   <a href="Fourier_draw.html">Fourier</a>
   <a href="Gaussians.html">Gaussian transform</a>
   <a href="Convolution.html">Convolution</a>
@@ -86,23 +86,25 @@
   <script>
     const width = 900, height1 = 340, height2 = 280;
     const x = d3.scaleLinear().domain([0, 20]).range([60, width - 40]);
-    const yTop = d3.scaleLinear().domain([-0.5, 3.5]).range([height1 - 50, 30]);
+  const yTop = d3.scaleLinear().domain([-0.5, 3.5]).range([height1 - 50, 30]);
     const yBottom = d3.scaleLinear().domain([0, 2.5]).range([height2 - 50, 30]);
 
     const svg1 = d3.select("#top-plot");
     const svg2 = d3.select("#bottom-plot");
 
     // Axes
-    svg1.append("g")
-        .attr("transform", `translate(0,${yTop(0)})`)
-        .call(d3.axisBottom(x));
+  svg1.append("g")
+    .attr("class", "x-axis-top")
+    .attr("transform", `translate(0,${yTop(0)})`)
+    .call(d3.axisBottom(x));
     svg1.append("g")
         .attr("transform", `translate(${x(0)},0)`)
         .attr("class", "y-axis-top")
         .call(d3.axisLeft(yTop));
-    svg2.append("g")
-        .attr("transform", `translate(0,${yBottom(0)})`)
-        .call(d3.axisBottom(x));
+  svg2.append("g")
+    .attr("class", "x-axis-bottom")
+    .attr("transform", `translate(0,${yBottom(0)})`)
+    .call(d3.axisBottom(x));
     svg2.append("g")
         .attr("transform", `translate(${x(0)},0)`)
         .attr("class", "y-axis-bottom")
@@ -140,6 +142,26 @@
 
       svg1.selectAll(".plot").remove();
 
+      // compute dynamic y-domain so plots/filled areas aren't clipped
+      // consider f, g and their product when choosing a vertical range
+      const allYs = f.map(d => d.y).concat(g.map(d => d.y)).concat(prod.map(d => d.y));
+  const topMax = d3.max(allYs) || 1;
+  const topMin = d3.min(allYs) || -0.5;
+  // expand a little padding around the extrema
+  const paddedMax = Math.max(3.5, topMax * 1.1);
+  const paddedMin = Math.min(-0.5, topMin * 1.1);
+      yTop.domain([paddedMin, paddedMax]);
+      // update the top y axis so ticks scale with new domain
+      svg1.select(".y-axis-top").remove();
+      svg1.append("g")
+        .attr("transform", `translate(${x(0)},0)`)
+        .attr("class", "y-axis-top")
+        .call(d3.axisLeft(yTop));
+      // also update the x-axis baseline position for the top plot so the
+      // filled area baseline (y=0) lines up with the x-axis and nothing is
+      // visually clipped when the y-domain changes
+      svg1.select('.x-axis-top').attr('transform', `translate(0,${yTop(0)})`);
+
       // f(x)
       svg1.append("path").datum(f)
         .attr("class", "plot").attr("fill", "none")
@@ -152,12 +174,13 @@
         .attr("stroke", "green").attr("stroke-width", 2)
         .attr("d", lineTop);
 
-      // Product area shading — fully visible down to y=0
+      // Product area shading — fill between product and baseline (y=0)
       if (showArea) {
         const area = d3.area()
           .x(d => x(d.x))
           .y0(yTop(0))
-          .y1(d => yTop(Math.max(0, d.y)));
+          // use the actual product value so positive and negative areas are shown
+          .y1(d => yTop(d.y));
 
         svg1.append("path")
           .datum(prod)
@@ -184,6 +207,8 @@
         .attr("stroke", "purple")
         .attr("stroke-width", 2)
         .attr("d", lineBottom);
+      // update bottom x-axis position as well (yBottom may have changed)
+      svg2.select('.x-axis-bottom').attr('transform', `translate(0,${yBottom(0)})`);
     }
 
     function handleSlider(newT) {
