@@ -1,10 +1,27 @@
 <!DOCTYPE html>
 <html lang="en">
+
+<!-- navigation bar -->
+<nav>
+  <a href="index.html">Home</a>
+  <a href="CubicRoots.html">Roots of a cubic</a>
+  <a href="Conformal.html">Conformal maps</a>
+  <a href="contour_integral.html">Complex integrals</a>
+  <a href="Fourier_draw.html">Fourier</a>
+  <a href="Fourier_properties.html">Fourier properties</a>
+  <a href="Gaussians.html">Gaussian transform</a>
+  <a href="Convolution.html">Convolution</a>
+  <a href="Aliasing.html">Aliasing</a>
+</nav>
+<hr>
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Fourier Transform Visualization</title>
   <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script id="MathJax-script" async
+    src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
   <style>
     body { font-family: sans-serif; background: #fafafa; margin: 20px; }
     svg { background: white; border: 1px solid #ccc; }
@@ -13,10 +30,13 @@
     label { display: inline-block; width: 120px; }
     input[type="number"] { width: 60px; margin-left: 10px; }
     button { margin-top: 10px; }
+    .axis-label { font-size: 12px; fill: #555; }
   </style>
 </head>
+
 <body>
   <h2>Interactive Fourier Transform Demo</h2>
+
   <div class="controls">
     <div>
       <label>Signal:</label>
@@ -29,46 +49,46 @@
     </div>
     <br>
     <div>
-      <label>Shift x₀:</label>
+      <label>Shift \(x_0\):</label>
       <input type="range" id="shiftSlider" min="-5" max="5" step="0.1" value="0">
       <input type="number" id="shiftInput" min="-5" max="5" step="0.1" value="0">
-      <span>f(x) → f(x − x₀)</span>
+      <span>\(f(x) \rightarrow f(x - x_0)\)</span>
     </div>
     <div>
-      <label>Scale a:</label>
+      <label>Scale \(a\):</label>
       <input type="range" id="scaleSlider" min="0.2" max="3" step="0.1" value="1">
       <input type="number" id="scaleInput" min="0.2" max="3" step="0.1" value="1">
-      <span>f(x) → f(a x)</span>
+      <span>\(f(x) \rightarrow f(a x)\)</span>
     </div>
     <div>
-      <label>Modulation k₀:</label>
+      <label>Modulation \(k_0\):</label>
       <input type="range" id="modSlider" min="-10" max="10" step="0.1" value="0">
       <input type="number" id="modInput" min="-10" max="10" step="0.1" value="0">
-      <span>f(x) → e<sup>i k₀ x</sup> f(x)</span>
+      <span>\(f(x) \rightarrow e^{i k_0 x} f(x)\)</span>
     </div>
     <button id="resetButton">Reset</button>
   </div>
 
   <div>
     <div class="panel">
-      <h3>Signal f(x)</h3>
-      <svg id="signalPlot" width="400" height="200"></svg>
+      <h3>Signal \(f(x)\)</h3>
+      <svg id="signalPlot" width="420" height="230"></svg>
     </div>
     <div class="panel">
-      <h3>Fourier Transform |F(k)|</h3>
-      <svg id="fourierPlot" width="400" height="200"></svg>
-      <h3>Phase arg(F(k))</h3>
-      <svg id="phasePlot" width="400" height="200"></svg>
+      <h3>Fourier Transform \(|F(k)|\)</h3>
+      <svg id="fourierPlot" width="420" height="230"></svg>
+      <h3>Phase \(\arg(F(k))\)</h3>
+      <svg id="phasePlot" width="420" height="230"></svg>
     </div>
   </div>
 
   <script>
-    const width = 400, height = 200;
-    const x = d3.scaleLinear().domain([-10, 10]).range([0, width]);
-    const y = d3.scaleLinear().domain([-1.5, 1.5]).range([height, 0]);
-    const kx = d3.scaleLinear().domain([-10, 10]).range([0, width]);
-    const kyMag = d3.scaleLinear().domain([0, 1.5]).range([height, 0]);
-    const kyPhase = d3.scaleLinear().domain([-Math.PI, Math.PI]).range([height, 0]);
+    const width = 400, height = 200, margin = 30;
+    const x = d3.scaleLinear().domain([-10, 10]).range([margin, width - margin]);
+    const y = d3.scaleLinear().domain([-1.5, 1.5]).range([height - margin, margin]);
+    const kx = d3.scaleLinear().domain([-10, 10]).range([margin, width - margin]);
+    const kyMag = d3.scaleLinear().domain([0, 1.5]).range([height - margin, margin]);
+    const kyPhase = d3.scaleLinear().domain([-Math.PI, Math.PI]).range([height - margin, margin]);
 
     const line = d3.line().x(d => x(d[0])).y(d => y(d[1]));
     const lineF = d3.line().x(d => kx(d[0])).y(d => kyMag(d[1]));
@@ -77,6 +97,30 @@
     const signalSVG = d3.select('#signalPlot');
     const fourierSVG = d3.select('#fourierPlot');
     const phaseSVG = d3.select('#phasePlot');
+
+    function addAxes(svg, xScale, yScale, xlabel, ylabel) {
+      const xAxis = d3.axisBottom(xScale).ticks(5);
+      const yAxis = d3.axisLeft(yScale).ticks(5);
+      svg.append("g")
+        .attr("transform", `translate(0,${height - margin})`)
+        .call(xAxis);
+      svg.append("g")
+        .attr("transform", `translate(${margin},0)`)
+        .call(yAxis);
+      svg.append("text")
+        .attr("x", width / 2)
+        .attr("y", height - 5)
+        .attr("text-anchor", "middle")
+        .attr("class", "axis-label")
+        .text(xlabel);
+      svg.append("text")
+        .attr("x", -height / 2)
+        .attr("y", 12)
+        .attr("text-anchor", "middle")
+        .attr("transform", "rotate(-90)")
+        .attr("class", "axis-label")
+        .text(ylabel);
+    }
 
     function gaussian(x){ return Math.exp(-x*x/2); }
     function square(x){ return Math.abs(x) < 1 ? 1 : 0; }
@@ -122,21 +166,25 @@
       const signal = xs.map(xv=>{
         const base = currentSignalFunc(scale*(xv-shift));
         const modRe = Math.cos(mod*xv);
-        const modIm = Math.sin(mod*xv);
-        const val = base*modRe; // show real part
-        return [xv, val, base, modIm];
+        const val = base*modRe;
+        return [xv, val];
       });
 
       const F = computeFT(signal);
 
       signalSVG.selectAll('*').remove();
+      addAxes(signalSVG, x, y, "x", "f(x)");
       signalSVG.append('path').datum(signal).attr('d', line).attr('stroke','steelblue').attr('fill','none');
 
       fourierSVG.selectAll('*').remove();
-      fourierSVG.append('path').datum(F).attr('d', d3.line().x(d=>kx(d[0])).y(d=>kyMag(d[1]))).attr('stroke','tomato').attr('fill','none');
+      addAxes(fourierSVG, kx, kyMag, "k", "|F(k)|");
+      fourierSVG.append('path').datum(F).attr('d', lineF).attr('stroke','tomato').attr('fill','none');
 
       phaseSVG.selectAll('*').remove();
-      phaseSVG.append('path').datum(F).attr('d', d3.line().x(d=>kx(d[0])).y(d=>kyPhase(d[2]))).attr('stroke','green').attr('fill','none');
+      addAxes(phaseSVG, kx, kyPhase, "k", "arg(F(k))");
+      phaseSVG.append('path').datum(F).attr('d', linePhase).attr('stroke','green').attr('fill','none');
+
+      MathJax.typesetPromise(); // refresh math rendering
     }
 
     function setInputs(){
