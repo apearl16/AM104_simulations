@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fourier Transform Demo</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    body { font-family: sans-serif; margin: 20px; background: #fafafa; }
+    .panel { display: inline-block; vertical-align: top; margin-right: 40px; }
+    svg { background: white; border: 1px solid #ccc; }
+    .controls { margin-top: 10px; }
+    label { display: inline-block; width: 100px; }
+  </style>
+</head>
+<body>
+  <h2>Fourier Transform Interactive Demo</h2>
+  <div>
+    <label>Signal Type:</label>
+    <select id="signalSelect">
+      <option value="gaussian">Gaussian</option>
+      <option value="square">Square Wave</option>
+      <option value="sine">Sine Wave</option>
+      <option value="triangle">Triangle</option>
+    </select>
+  </div>
+
+  <div class="controls">
+    <div><label>Shift (x₀):</label><input type="range" id="shiftSlider" min="-5" max="5" step="0.1" value="0" /></div>
+    <div><label>Modulation (k₀):</label><input type="range" id="modSlider" min="-10" max="10" step="0.1" value="0" /></div>
+    <div><label>Scale (a):</label><input type="range" id="scaleSlider" min="0.2" max="3" step="0.1" value="1" /></div>
+    <div><label>Linearity Mix:</label><input type="range" id="mixSlider" min="0" max="1" step="0.01" value="0.5" /></div>
+  </div>
+
+  <div>
+    <div class="panel">
+      <h3>Signal f(x)</h3>
+      <svg id="signalPlot" width="400" height="200"></svg>
+    </div>
+    <div class="panel">
+      <h3>Fourier Transform F(k)</h3>
+      <svg id="fourierPlot" width="400" height="200"></svg>
+    </div>
+  </div>
+
+  <script>
+    const width = 400, height = 200;
+    const x = d3.scaleLinear().domain([-10, 10]).range([0, width]);
+    const k = d3.scaleLinear().domain([-10, 10]).range([0, width]);
+    const y = d3.scaleLinear().domain([-1.5, 1.5]).range([height, 0]);
+
+    const signalSVG = d3.select('#signalPlot');
+    const fourierSVG = d3.select('#fourierPlot');
+
+    const line = d3.line().x(d => x(d[0])).y(d => y(d[1]));
+
+    function gaussian(x) { return Math.exp(-x * x / 2); }
+    function square(x) { return Math.abs(x) < 1 ? 1 : 0; }
+    function sine(x) { return Math.sin(2 * Math.PI * 0.5 * x); }
+    function triangle(x) { return Math.max(0, 1 - Math.abs(x)); }
+
+    function getSignal(type, xs) {
+      switch (type) {
+        case 'gaussian': return xs.map(x => [x, gaussian(x)]);
+        case 'square': return xs.map(x => [x, square(x)]);
+        case 'sine': return xs.map(x => [x, sine(x)]);
+        case 'triangle': return xs.map(x => [x, triangle(x)]);
+      }
+    }
+
+    function dft(signal, xs, ks) {
+      return ks.map(kv => {
+        let re = 0, im = 0;
+        for (let i = 0; i < xs.length; i++) {
+          const x = xs[i];
+          const fx = signal[i][1];
+          re += fx * Math.cos(-kv * x);
+          im += fx * Math.sin(-kv * x);
+        }
+        return [kv, Math.sqrt(re * re + im * im) / xs.length];
+      });
+    }
+
+    function update() {
+      const type = d3.select('#signalSelect').property('value');
+      const shift = +d3.select('#shiftSlider').property('value');
+      const mod = +d3.select('#modSlider').property('value');
+      const scale = +d3.select('#scaleSlider').property('value');
+      const mix = +d3.select('#mixSlider').property('value');
+
+      const xs = d3.range(-10, 10.1, 0.1);
+
+      const sig1 = getSignal(type, xs.map(v => (v - shift) / scale));
+      const sig2 = getSignal('sine', xs.map(v => v));
+      let signal = sig1.map((d, i) => {
+        const xval = xs[i];
+        let val = d[1] * Math.cos(mod * xval) - 0 * Math.sin(mod * xval);
+        val = (1 - mix) * val + mix * sig2[i][1];
+        return [xval, val];
+      });
+
+      const ftransform = dft(signal, xs, d3.range(-10, 10.1, 0.1));
+
+      signalSVG.selectAll('*').remove();
+      signalSVG.append('path').datum(signal).attr('d', line).attr('stroke', 'steelblue').attr('fill', 'none');
+
+      fourierSVG.selectAll('*').remove();
+      fourierSVG.append('path').datum(ftransform).attr('d', line).attr('stroke', 'tomato').attr('fill', 'none');
+    }
+
+    d3.selectAll('select,input').on('input', update);
+    update();
+  </script>
+</body>
+</html>
