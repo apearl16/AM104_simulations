@@ -139,7 +139,7 @@
       else if(type==='sine') currentSignalFunc=sine;
       else if(type==='triangle') currentSignalFunc=triangle;
 
-      const xs = d3.range(-10,10.1,0.1);
+      const xs = d3.range(-10,10.1,0.2);
       const signal = xs.map(xv=>{
         const base = currentSignalFunc(scale*(xv-shift));
         const modRe = Math.cos(mod*xv);
