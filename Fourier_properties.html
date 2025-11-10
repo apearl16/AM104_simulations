@@ -30,13 +30,12 @@
     label { display: inline-block; width: 120px; }
     input[type="number"] { width: 60px; margin-left: 10px; }
     button { margin-top: 10px; }
-    .axis-label { font-size: 12px; fill: #555; }
+    .xlabel { text-anchor: middle; font-size: 12px; fill: #555; }
   </style>
 </head>
 
 <body>
   <h2>Interactive Fourier Transform Demo</h2>
-
   <div class="controls">
     <div>
       <label>Signal:</label>
@@ -52,19 +51,19 @@
       <label>Shift \(x_0\):</label>
       <input type="range" id="shiftSlider" min="-5" max="5" step="0.1" value="0">
       <input type="number" id="shiftInput" min="-5" max="5" step="0.1" value="0">
-      <span>\(f(x) \rightarrow f(x - x_0)\)</span>
+      <span>\(f(x) \to f(x - x_0)\)</span>
     </div>
     <div>
       <label>Scale \(a\):</label>
       <input type="range" id="scaleSlider" min="0.2" max="3" step="0.1" value="1">
       <input type="number" id="scaleInput" min="0.2" max="3" step="0.1" value="1">
-      <span>\(f(x) \rightarrow f(a x)\)</span>
+      <span>\(f(x) \to f(a x)\)</span>
     </div>
     <div>
       <label>Modulation \(k_0\):</label>
       <input type="range" id="modSlider" min="-10" max="10" step="0.1" value="0">
       <input type="number" id="modInput" min="-10" max="10" step="0.1" value="0">
-      <span>\(f(x) \rightarrow e^{i k_0 x} f(x)\)</span>
+      <span>\(f(x) \to e^{i k_0 x} f(x)\)</span>
     </div>
     <button id="resetButton">Reset</button>
   </div>
@@ -72,23 +71,26 @@
   <div>
     <div class="panel">
       <h3>Signal \(f(x)\)</h3>
-      <svg id="signalPlot" width="420" height="230"></svg>
+      <svg id="signalPlot" width="400" height="200"></svg>
+      <div style="text-align:center;">\(x\)</div>
     </div>
     <div class="panel">
       <h3>Fourier Transform \(|F(k)|\)</h3>
-      <svg id="fourierPlot" width="420" height="230"></svg>
+      <svg id="fourierPlot" width="400" height="200"></svg>
+      <div style="text-align:center;">\(k\)</div>
       <h3>Phase \(\arg(F(k))\)</h3>
-      <svg id="phasePlot" width="420" height="230"></svg>
+      <svg id="phasePlot" width="400" height="200"></svg>
+      <div style="text-align:center;">\(k\)</div>
     </div>
   </div>
 
   <script>
-    const width = 400, height = 200, margin = 30;
-    const x = d3.scaleLinear().domain([-10, 10]).range([margin, width - margin]);
-    const y = d3.scaleLinear().domain([-1.5, 1.5]).range([height - margin, margin]);
-    const kx = d3.scaleLinear().domain([-10, 10]).range([margin, width - margin]);
-    const kyMag = d3.scaleLinear().domain([0, 1.5]).range([height - margin, margin]);
-    const kyPhase = d3.scaleLinear().domain([-Math.PI, Math.PI]).range([height - margin, margin]);
+    const width = 400, height = 200;
+    const x = d3.scaleLinear().domain([-10, 10]).range([0, width]);
+    const y = d3.scaleLinear().domain([-1.5, 1.5]).range([height, 0]);
+    const kx = d3.scaleLinear().domain([-10, 10]).range([0, width]);
+    const kyMag = d3.scaleLinear().domain([0, 1.5]).range([height, 0]);
+    const kyPhase = d3.scaleLinear().domain([-Math.PI, Math.PI]).range([height, 0]);
 
     const line = d3.line().x(d => x(d[0])).y(d => y(d[1]));
     const lineF = d3.line().x(d => kx(d[0])).y(d => kyMag(d[1]));
@@ -97,30 +99,6 @@
     const signalSVG = d3.select('#signalPlot');
     const fourierSVG = d3.select('#fourierPlot');
     const phaseSVG = d3.select('#phasePlot');
-
-    function addAxes(svg, xScale, yScale, xlabel, ylabel) {
-      const xAxis = d3.axisBottom(xScale).ticks(5);
-      const yAxis = d3.axisLeft(yScale).ticks(5);
-      svg.append("g")
-        .attr("transform", `translate(0,${height - margin})`)
-        .call(xAxis);
-      svg.append("g")
-        .attr("transform", `translate(${margin},0)`)
-        .call(yAxis);
-      svg.append("text")
-        .attr("x", width / 2)
-        .attr("y", height - 5)
-        .attr("text-anchor", "middle")
-        .attr("class", "axis-label")
-        .text(xlabel);
-      svg.append("text")
-        .attr("x", -height / 2)
-        .attr("y", 12)
-        .attr("text-anchor", "middle")
-        .attr("transform", "rotate(-90)")
-        .attr("class", "axis-label")
-        .text(ylabel);
-    }
 
     function gaussian(x){ return Math.exp(-x*x/2); }
     function square(x){ return Math.abs(x) < 1 ? 1 : 0; }
@@ -152,7 +130,6 @@
       const scale = +d3.select('#scaleSlider').property('value');
       const mod = +d3.select('#modSlider').property('value');
 
-      // sync number inputs
       d3.select('#shiftInput').property('value', shift);
       d3.select('#scaleInput').property('value', scale);
       d3.select('#modInput').property('value', mod);
@@ -166,25 +143,22 @@
       const signal = xs.map(xv=>{
         const base = currentSignalFunc(scale*(xv-shift));
         const modRe = Math.cos(mod*xv);
-        const val = base*modRe;
+        const val = base*modRe; 
         return [xv, val];
       });
 
       const F = computeFT(signal);
 
       signalSVG.selectAll('*').remove();
-      addAxes(signalSVG, x, y, "x", "f(x)");
       signalSVG.append('path').datum(signal).attr('d', line).attr('stroke','steelblue').attr('fill','none');
 
       fourierSVG.selectAll('*').remove();
-      addAxes(fourierSVG, kx, kyMag, "k", "|F(k)|");
       fourierSVG.append('path').datum(F).attr('d', lineF).attr('stroke','tomato').attr('fill','none');
 
       phaseSVG.selectAll('*').remove();
-      addAxes(phaseSVG, kx, kyPhase, "k", "arg(F(k))");
       phaseSVG.append('path').datum(F).attr('d', linePhase).attr('stroke','green').attr('fill','none');
 
-      MathJax.typesetPromise(); // refresh math rendering
+      MathJax.typesetPromise();
     }
 
     function setInputs(){
