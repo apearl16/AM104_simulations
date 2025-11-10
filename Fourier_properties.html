@@ -23,6 +23,25 @@
   <script id="MathJax-script" async
     src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
   <style>
+    /* shared navigation styling (matches index.html) */
+    nav {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 1.25rem;
+    }
+    nav a {
+      background: white;
+      padding: 10px 14px;
+      border-radius: 8px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+      color: #0b5cff;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    nav a:hover { transform: translateY(-2px); box-shadow: 0 6px 14px rgba(11,92,255,0.06); }
+
     body { font-family: sans-serif; background: #fafafa; margin: 20px; }
     svg { background: white; border: 1px solid #ccc; }
     .panel { display: inline-block; vertical-align: top; margin-right: 40px; }
