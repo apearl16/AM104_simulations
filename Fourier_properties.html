@@ -1,208 +1,120 @@
-<!DOCTYPE html>
-<html lang="en">
+<script src="https://cdn.jsdelivr.net/npm/fft.js@4.0.4/dist/fft.min.js"></script>
+<script>
+const width = 400, height = 200;
+const N = 512; // power of two for FFT
+const xs = d3.range(-10, 10, 20 / N);
 
-<!-- navigation bar -->
-<nav>
-  <a href="index.html">Home</a>
-  <a href="CubicRoots.html">Roots of a cubic</a>
-  <a href="Conformal.html">Conformal maps</a>
-  <a href="contour_integral.html">Complex integrals</a>
-  <a href="Fourier_draw.html">Fourier</a>
-  <a href="Fourier_properties.html">Fourier properties</a>
-  <a href="Gaussians.html">Gaussian transform</a>
-  <a href="Convolution.html">Convolution</a>
-  <a href="Aliasing.html">Aliasing</a>
-</nav>
-<hr>
+const x = d3.scaleLinear().domain([-10, 10]).range([0, width]);
+const y = d3.scaleLinear().domain([-1.5, 1.5]).range([height, 0]);
+const kx = d3.scaleLinear().domain([-N/20, N/20]).range([0, width]);
+const kyMag = d3.scaleLinear().domain([0, 1.5]).range([height, 0]);
+const kyPhase = d3.scaleLinear().domain([-Math.PI, Math.PI]).range([height, 0]);
 
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Fourier Transform Visualization</title>
-  <script src="https://d3js.org/d3.v7.min.js"></script>
-  <script id="MathJax-script" async
-    src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
-  <style>
-    /* shared navigation styling (matches index.html) */
-    nav {
-      display: flex;
-      gap: 12px;
-      justify-content: center;
-      flex-wrap: wrap;
-      margin-bottom: 1.25rem;
-    }
-    nav a {
-      background: white;
-      padding: 10px 14px;
-      border-radius: 8px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-      color: #0b5cff;
-      text-decoration: none;
-      font-weight: 600;
-    }
-    nav a:hover { transform: translateY(-2px); box-shadow: 0 6px 14px rgba(11,92,255,0.06); }
+const line = d3.line().x(d => x(d[0])).y(d => y(d[1]));
+const lineF = d3.line().x(d => kx(d[0])).y(d => kyMag(d[1]));
+const linePhase = d3.line().x(d => kx(d[0])).y(d => kyPhase(d[1]));
 
-    body { font-family: sans-serif; background: #fafafa; margin: 20px; }
-    svg { background: white; border: 1px solid #ccc; }
-    .panel { display: inline-block; vertical-align: top; margin-right: 40px; }
-    .controls { margin-top: 10px; margin-bottom: 20px; }
-    label { display: inline-block; width: 120px; }
-    input[type="number"] { width: 60px; margin-left: 10px; }
-    button { margin-top: 10px; }
-    .xlabel { text-anchor: middle; font-size: 12px; fill: #555; }
-  </style>
-</head>
+const signalSVG = d3.select('#signalPlot');
+const fourierSVG = d3.select('#fourierPlot');
+const phaseSVG = d3.select('#phasePlot');
 
-<body>
-  <h2>Interactive Fourier Transform Demo</h2>
-  <div class="controls">
-    <div>
-      <label>Signal:</label>
-      <select id="signalSelect">
-        <option value="gaussian">Gaussian</option>
-        <option value="square">Square</option>
-        <option value="sine">Sine</option>
-        <option value="triangle">Triangle</option>
-      </select>
-    </div>
-    <br>
-    <div>
-      <label>Shift \(x_0\):</label>
-      <input type="range" id="shiftSlider" min="-5" max="5" step="0.1" value="0">
-      <input type="number" id="shiftInput" min="-5" max="5" step="0.1" value="0">
-      <span>\(f(x) \to f(x - x_0)\)</span>
-    </div>
-    <div>
-      <label>Scale \(a\):</label>
-      <input type="range" id="scaleSlider" min="0.2" max="3" step="0.1" value="1">
-      <input type="number" id="scaleInput" min="0.2" max="3" step="0.1" value="1">
-      <span>\(f(x) \to f(a x)\)</span>
-    </div>
-    <div>
-      <label>Modulation \(k_0\):</label>
-      <input type="range" id="modSlider" min="-10" max="10" step="0.1" value="0">
-      <input type="number" id="modInput" min="-10" max="10" step="0.1" value="0">
-      <span>\(f(x) \to e^{i k_0 x} f(x)\)</span>
-    </div>
-    <button id="resetButton">Reset</button>
-  </div>
+function gaussian(x){ return Math.exp(-x*x/2); }
+function square(x){ return Math.abs(x) < 1 ? 1 : 0; }
+function sine(x){ return Math.sin(2*Math.PI*0.5*x); }
+function triangle(x){ const t = Math.abs(x); return t<1 ? 1-t : 0; }
 
-  <div>
-    <div class="panel">
-      <h3>Signal \(f(x)\)</h3>
-      <svg id="signalPlot" width="400" height="200"></svg>
-      <div style="text-align:center;">\(x\)</div>
-    </div>
-    <div class="panel">
-      <h3>Fourier Transform \(|F(k)|\)</h3>
-      <svg id="fourierPlot" width="400" height="200"></svg>
-      <div style="text-align:center;">\(k\)</div>
-      <h3>Phase \(\arg(F(k))\)</h3>
-      <svg id="phasePlot" width="400" height="200"></svg>
-      <div style="text-align:center;">\(k\)</div>
-    </div>
-  </div>
+let currentSignalFunc = gaussian;
 
-  <script>
-    const width = 400, height = 200;
-    const x = d3.scaleLinear().domain([-10, 10]).range([0, width]);
-    const y = d3.scaleLinear().domain([-1.5, 1.5]).range([height, 0]);
-    const kx = d3.scaleLinear().domain([-10, 10]).range([0, width]);
-    const kyMag = d3.scaleLinear().domain([0, 1.5]).range([height, 0]);
-    const kyPhase = d3.scaleLinear().domain([-Math.PI, Math.PI]).range([height, 0]);
+function computeFFT(signal) {
+  const f = new FFT(N);
+  const inputRe = new Float64Array(N);
+  const inputIm = new Float64Array(N);
+  for (let i = 0; i < N; i++) inputRe[i] = signal[i][1];
+  const outRe = new Float64Array(N);
+  const outIm = new Float64Array(N);
+  f.transform(outRe, outIm, inputRe, inputIm);
 
-    const line = d3.line().x(d => x(d[0])).y(d => y(d[1]));
-    const lineF = d3.line().x(d => kx(d[0])).y(d => kyMag(d[1]));
-    const linePhase = d3.line().x(d => kx(d[0])).y(d => kyPhase(d[1]));
+  // shift zero frequency to center
+  const half = N/2;
+  const magPhase = [];
+  for (let i = 0; i < N; i++) {
+    const j = (i + half) % N;
+    const mag = Math.sqrt(outRe[j]**2 + outIm[j]**2) / N;
+    const phase = Math.atan2(outIm[j], outRe[j]);
+    magPhase.push([(i-half)/10, mag, phase]);
+  }
+  return magPhase;
+}
 
-    const signalSVG = d3.select('#signalPlot');
-    const fourierSVG = d3.select('#fourierPlot');
-    const phaseSVG = d3.select('#phasePlot');
+function update(){
+  const type = d3.select('#signalSelect').property('value');
+  const shift = +d3.select('#shiftSlider').property('value');
+  const scale = +d3.select('#scaleSlider').property('value');
+  const mod = +d3.select('#modSlider').property('value');
 
-    function gaussian(x){ return Math.exp(-x*x/2); }
-    function square(x){ return Math.abs(x) < 1 ? 1 : 0; }
-    function sine(x){ return Math.sin(2*Math.PI*0.5*x); }
-    function triangle(x){ let t = Math.abs(x); return t<1 ? 1-t : 0; }
+  d3.select('#shiftInput').property('value', shift);
+  d3.select('#scaleInput').property('value', scale);
+  d3.select('#modInput').property('value', mod);
 
-    let currentSignalFunc = gaussian;
+  if(type==='gaussian') currentSignalFunc=gaussian;
+  else if(type==='square') currentSignalFunc=square;
+  else if(type==='sine') currentSignalFunc=sine;
+  else if(type==='triangle') currentSignalFunc=triangle;
 
-    function computeFT(signal){
-      const xs = signal.map(d=>d[0]);
-      const fs = signal.map(d=>d[1]);
-      const ks = d3.range(-10,10.1,0.2);
-      return ks.map(k=>{
-        let re=0,im=0;
-        for(let i=0;i<xs.length;i++){
-          let x=xs[i], f=fs[i];
-          re += f*Math.cos(-k*x);
-          im += f*Math.sin(-k*x);
-        }
-        let mag = Math.sqrt(re*re+im*im)/xs.length;
-        let phase = Math.atan2(im,re);
-        return [k, mag, phase];
-      });
-    }
+  const signal = xs.map(xv=>{
+    const base = currentSignalFunc(scale*(xv-shift));
+    return [xv, base * Math.cos(mod*xv)];
+  });
 
-    function update(){
-      const type = d3.select('#signalSelect').property('value');
-      const shift = +d3.select('#shiftSlider').property('value');
-      const scale = +d3.select('#scaleSlider').property('value');
-      const mod = +d3.select('#modSlider').property('value');
+  const F = computeFFT(signal);
 
-      d3.select('#shiftInput').property('value', shift);
-      d3.select('#scaleInput').property('value', scale);
-      d3.select('#modInput').property('value', mod);
+  signalSVG.selectAll('*').remove();
+  signalSVG.append('path')
+    .datum(signal).attr('d', line)
+    .attr('stroke','steelblue').attr('fill','none');
 
-      if(type==='gaussian') currentSignalFunc=gaussian;
-      else if(type==='square') currentSignalFunc=square;
-      else if(type==='sine') currentSignalFunc=sine;
-      else if(type==='triangle') currentSignalFunc=triangle;
+  fourierSVG.selectAll('*').remove();
+  fourierSVG.append('path')
+    .datum(F).attr('d', lineF)
+    .attr('stroke','tomato').attr('fill','none');
 
-      const xs = d3.range(-10,10.1,0.2);
-      const signal = xs.map(xv=>{
-        const base = currentSignalFunc(scale*(xv-shift));
-        const modRe = Math.cos(mod*xv);
-        const val = base*modRe; 
-        return [xv, val];
-      });
+  phaseSVG.selectAll('*').remove();
+  phaseSVG.append('path')
+    .datum(F).attr('d', linePhase)
+    .attr('stroke','green').attr('fill','none');
 
-      const F = computeFT(signal);
+  // Y-axis label for phase
+  phaseSVG.append('text')
+    .attr('x', 10)
+    .attr('y', 15)
+    .attr('fill', '#333')
+    .attr('font-size', '12px')
+    .text('Phase (radians)');
 
-      signalSVG.selectAll('*').remove();
-      signalSVG.append('path').datum(signal).attr('d', line).attr('stroke','steelblue').attr('fill','none');
+  MathJax.typesetPromise();
+}
 
-      fourierSVG.selectAll('*').remove();
-      fourierSVG.append('path').datum(F).attr('d', lineF).attr('stroke','tomato').attr('fill','none');
+function setInputs(){
+  d3.select('#shiftInput').on('input', function(){
+    d3.select('#shiftSlider').property('value', this.value); update();
+  });
+  d3.select('#scaleInput').on('input', function(){
+    d3.select('#scaleSlider').property('value', this.value); update();
+  });
+  d3.select('#modInput').on('input', function(){
+    d3.select('#modSlider').property('value', this.value); update();
+  });
+}
 
-      phaseSVG.selectAll('*').remove();
-      phaseSVG.append('path').datum(F).attr('d', linePhase).attr('stroke','green').attr('fill','none');
+function reset(){
+  d3.select('#shiftSlider').property('value', 0);
+  d3.select('#scaleSlider').property('value', 1);
+  d3.select('#modSlider').property('value', 0);
+  update();
+}
 
-      MathJax.typesetPromise();
-    }
-
-    function setInputs(){
-      d3.select('#shiftInput').on('input', function(){
-        d3.select('#shiftSlider').property('value', this.value); update();
-      });
-      d3.select('#scaleInput').on('input', function(){
-        d3.select('#scaleSlider').property('value', this.value); update();
-      });
-      d3.select('#modInput').on('input', function(){
-        d3.select('#modSlider').property('value', this.value); update();
-      });
-    }
-
-    function reset(){
-      d3.select('#shiftSlider').property('value', 0);
-      d3.select('#scaleSlider').property('value', 1);
-      d3.select('#modSlider').property('value', 0);
-      update();
-    }
-
-    d3.selectAll('select,input[type="range"]').on('input', update);
-    d3.select('#resetButton').on('click', reset);
-    setInputs();
-    update();
-  </script>
-</body>
-</html>
+d3.selectAll('select,input[type="range"]').on('input', update);
+d3.select('#resetButton').on('click', reset);
+setInputs();
+update();
+</script>
