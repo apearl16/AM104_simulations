@@ -27,10 +27,26 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Aliasing & Nyquist Demonstration</title>
   <script src="https://d3js.org/d3.v7.min.js"></script>
-  <link rel="stylesheet" href="css/site.css">
   <style>
-    /* site navigation moved to external CSS (css/site.css) */
-    /* <link rel="stylesheet" href="css/site.css"> is required in the head */
+    /* shared navigation styling (matches index.html) */
+    nav {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 1.25rem;
+    }
+    nav a {
+      background: white;
+      padding: 10px 14px;
+      border-radius: 8px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+      color: #0b5cff;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    nav a:hover { transform: translateY(-2px); box-shadow: 0 6px 14px rgba(11,92,255,0.06); }
+
     body {
       font-family: sans-serif;
       display: flex;
