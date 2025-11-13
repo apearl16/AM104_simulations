@@ -5,6 +5,8 @@ nav {
   justify-content: center;
   flex-wrap: wrap;
   margin-bottom: 1.25rem;
+  position: relative;
+  z-index: 1000;
 }
 
 nav a {
@@ -53,7 +55,7 @@ nav a:hover {
   border-radius: 8px;
   padding: 8px;
   top: calc(100% + 6px);
-  z-index: 100;
+  z-index: 10000;
   flex-direction: column;
   gap: 6px;
 }
