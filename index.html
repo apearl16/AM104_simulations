@@ -34,6 +34,14 @@
       font-weight: 600;
     }
     nav a:hover { transform: translateY(-2px); box-shadow: 0 6px 14px rgba(11,92,255,0.06); }
+    /* dropdown styles for Videos menu */
+    .dropdown { position: relative; display: inline-block; }
+    .dropbtn { background: white; border: none; padding: 10px 14px; border-radius: 8px; font-weight:600; color:#0b5cff; cursor:pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .dropbtn:hover { transform: translateY(-2px); box-shadow: 0 6px 14px rgba(11,92,255,0.06); }
+    .dropdown-content { display: none; position: absolute; background: white; min-width: 180px; box-shadow: 0 6px 18px rgba(0,0,0,0.12); border-radius: 8px; padding: 8px; top: calc(100% + 6px); z-index: 100; flex-direction: column; gap: 6px; }
+    .dropdown-content a { display: block; padding: 8px 10px; border-radius: 6px; color: #0b5cff; text-decoration: none; font-weight: 500; }
+    .dropdown-content a:hover { background: #f1f5ff; }
+    nav .dropdown:hover .dropdown-content { display: flex; }
     main { display: block; max-width: 900px; margin: 0 auto; }
     footer { text-align: center; margin-top: 28px; color: #666; font-size: 0.9rem; }
   </style>
@@ -45,6 +53,7 @@
   </header>
 
   <nav>
+    <a href="index.html">Home</a>
     <a href="CubicRoots.html">Roots of a cubic</a>
     <a href="Conformal.html">Conformal maps</a>
     <a href="contour_integral.html">Complex integrals</a>
@@ -53,6 +62,14 @@
     <a href="Gaussians.html">Gaussian transform</a>
     <a href="Convolution.html">Convolution</a>
     <a href="Aliasing.html">Aliasing</a>
+    <div class="dropdown">
+      <button class="dropbtn" aria-haspopup="true" aria-expanded="false">Videos ▾</button>
+      <div class="dropdown-content" role="menu">
+        <a href="videos/lecture1.html">Lecture 1</a>
+        <a href="videos/lecture2.html">Lecture 2</a>
+        <a href="videos/lecture3.html">Lecture 3</a>
+      </div>
+    </div>
   </nav>
 
   <main>
