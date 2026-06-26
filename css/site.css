@@ -1,4 +1,7 @@
-/* Shared Navigation and Dropdown Styles */
+/* ==========================================================================
+   Shared Navigation and Dropdown Styles 
+   ========================================================================== */
+
 nav {
   display: flex;
   gap: 12px;
@@ -17,6 +20,7 @@ nav a {
   color: #0b5cff;
   text-decoration: none;
   font-weight: 600;
+  transition: transform 0.2s, box-shadow 0.2s; /* Smooths out hover animations */
 }
 
 nav a:hover {
@@ -24,7 +28,10 @@ nav a:hover {
   box-shadow: 0 6px 14px rgba(11,92,255,0.06);
 }
 
-/* Dropdown Styles for Videos Menu */
+/* ==========================================================================
+   Dropdown Styles for Videos Menu 
+   ========================================================================== */
+
 .dropdown {
   position: relative;
   display: inline-block;
@@ -39,6 +46,7 @@ nav a:hover {
   color: #0b5cff;
   cursor: pointer;
   box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  transition: transform 0.2s, box-shadow 0.2s; /* Matches navigation link transitions */
 }
 
 .dropbtn:hover {
@@ -54,10 +62,23 @@ nav a:hover {
   box-shadow: 0 6px 18px rgba(0,0,0,0.12);
   border-radius: 8px;
   padding: 8px;
-  top: calc(100% + 6px);
+  top: calc(100% + 6px); /* Keeps the elegant floating layout gap */
   z-index: 10000;
   flex-direction: column;
   gap: 6px;
+}
+
+/* Invisible bridge layer to span the 6px gap.
+  Ensures cursor tracking does not drop the hover focus boundary.
+*/
+.dropdown-content::before {
+  content: "";
+  position: absolute;
+  top: -10px;   /* Extends upward across the gap to make solid contact with the button */
+  left: 0;
+  right: 0;
+  height: 10px; /* Fully blankets the 6px empty gap zone */
+  background: transparent; /* Stays hidden out of sight */
 }
 
 .dropdown-content a {
@@ -73,11 +94,15 @@ nav a:hover {
   background: #f1f5ff;
 }
 
+/* Activates the layout display toggle when parent wrapper is hovered */
 nav .dropdown:hover .dropdown-content {
   display: flex;
 }
 
-/* Video Page Wrapper */
+/* ==========================================================================
+   Video Page Wrapper 
+   ========================================================================== */
+
 .video-wrap {
   max-width: 900px;
   margin: 0 auto;
